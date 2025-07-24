@@ -1,32 +1,11 @@
-boolean inputhold[4]; //kan weg?
-
-//SwitchType	Array(1)	Byte
-//SwitchEffect	Array(2)	Byte
-//SwitchCounter	Value	Integer
+#include <Arduino.h>
+#include "Elementic.h"
 
 
 
-
-
-
-void inputsetup(){
-    Serial.println("inputsetup variables");
-    inputsetupvariables();
-
-    for (byte i=1; i <= SwitchCounter; i++){
-        pinMode(SwitchPin[i], INPUT);
-        }
-    
-    if (DoorBellEnabled){
-        pinMode(DoorBellSwitch, INPUT);
-        }
-
-    
-    Serial.println("After inputsetup");
-}
 
 void input(){
-for (byte i=1; i <= SwitchCounter; i++){
+for (uint8_t i=1; i <= SwitchCounter; i++){
     if(digitalRead(SwitchPin[i])==HIGH||SwitchPressedExternal[i]){
         if(SwitchPressed[i]==false){
             Serial.print("Switch pressed: ");
@@ -167,7 +146,6 @@ for (byte i=1; i <= SwitchCounter; i++){
             }
         }
     }
-if(DoorBellEnabled&&digitalRead(DoorBellSwitch)==true&&DoorBellCounter==0){
-    DoorBellCounter = 500;
-    }
+
 }
+// Implementation for input

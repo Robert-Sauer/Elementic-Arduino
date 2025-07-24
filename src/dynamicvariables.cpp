@@ -1,48 +1,21 @@
+#include "Elementic.h"
+#include <Arduino.h>
+#include <string.h>
+
 // -------------------
 //    TYPE DEFINITIONS
 // -------------------
-enum VariableType {
-    DYNAMIC_STRING = 0,
-    DYNAMIC_BYTE,
-    DYNAMIC_INT,
-    DYNAMIC_IP,
-    DYNAMIC_PASSWORD
-};
 
-// -------------------
-//   CONFIG & GLOBALS
-// -------------------
-#define TOTAL_STRINGS   5
-#define TOTAL_BYTES     2
-#define TOTAL_INTS      2
-#define TOTAL_IPS       3
-#define TOTAL_PASSWORDS 1
-#define MAX_STRING_LENGTH 15 // or suitable value!
 
 
 // Calculate total variables
-const int totalVariables = TOTAL_STRINGS + TOTAL_BYTES + TOTAL_INTS + TOTAL_IPS + TOTAL_PASSWORDS;
+//const int totalVariables = TOTAL_STRINGS + TOTAL_BYTES + TOTAL_INTS + TOTAL_IPS + TOTAL_PASSWORDS;
 
 
-// A union to hold different types of variable values
-union VariableValue {
-    char strVal[MAX_STRING_LENGTH];
-    byte byteVal;
-    int intVal;
-    byte ipVal[4];
-    char passVal[MAX_STRING_LENGTH];
-};
 
-// A struct to hold one variable, its type, name, value, and priority
-struct DynamicVariable {
-    VariableType type;
-    String       name;
-    VariableValue value;
-    int          priority; // priority assigned at definition
-};
 
 // Global array of all variables
-DynamicVariable variables[totalVariables];
+// DynamicVariable variables[totalVariables];
 
 // Indices to keep track of insertion points per type
 int stringIndex   = 0;

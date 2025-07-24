@@ -9,7 +9,11 @@
       "email": "rsauer@areanet.nl"
     }
   ],
-  "license": "MIT",
-  "frameworks": "*",
-  "platforms": "*"
+ "frameworks": "arduino",
+  "platforms": "*",
+  "headers": "Elementic.h",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "include"
+  }
 }
