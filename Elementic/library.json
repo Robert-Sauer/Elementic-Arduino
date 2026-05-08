@@ -1,0 +1,30 @@
+{
+  "name": "Elementic",
+  "version": "1.0.0",
+  "description": "Fast configuration tool via serial port, dynamic variables, dynamic inputs, dynamic outputs, MQTT connection, and EEPROM storage",
+  "keywords": ["elementic", "USB", "serial", "Controllino", "io", "variables"],
+  "authors": [
+    {
+      "name": "Robert Sauer",
+      "email": "rsauer@areanet.nl"
+    }
+  ],
+ "frameworks": "arduino",
+  "platforms": "*",
+  "headers": "Elementic.h",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "include"
+  },
+  "dependencies": [
+    {
+      "owner": "arduino-libraries",
+      "name": "Ethernet"
+    },
+    {
+      "owner": "knolleary",
+      "name": "PubSubClient"
+    }
+  ]
+  
+}
