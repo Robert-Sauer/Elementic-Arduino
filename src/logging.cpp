@@ -1,3 +1,9 @@
+/*
+ * logging.cpp
+ *
+ * Implements centralized logging helpers for serial and MQTT output with consistent severity tagging.
+ */
+
 #include <Arduino.h>
 #include <string.h>
 #include "Elementic.h"

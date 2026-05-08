@@ -1,3 +1,9 @@
+/*
+ * dmx.cpp
+ *
+ * Implements DMX channel handling and platform-specific serial output support for lighting and stage-control scenarios.
+ */
+
 #include "Elementic.h"
 #include <Arduino.h>
 
@@ -16,10 +22,19 @@
   const int DMX_TX_PIN = 17; // Set to correct TX pin for your ESP32-C6 board
   const int DMXDirectionPin = 16;
 
-#elif defined(ARDUINO_AVR_MEGA2560)
-  #define DMXSerial Serial3
-  #define USE_PORTJ
-  const uint8_t PORTJ_DDR_MASK = B01000000;
+#elif defined(ARDUINO_ARCH_AVR)
+  #if defined(RS485_SERIAL_PORT)
+    #define DMXSerial RS485_SERIAL_PORT
+  #elif defined(UBRR3H) || defined(ARDUINO_AVR_MEGA2560)
+    #define DMXSerial Serial3
+  #else
+    #define DMXSerial Serial
+  #endif
+
+  #if defined(__AVR_ATmega2560__) || defined(ARDUINO_AVR_MEGA2560)
+    #define USE_PORTJ
+    const uint8_t PORTJ_DDR_MASK = B01000000;
+  #endif
 
 #elif defined(ARDUINO_RASPBERRY_PI_PICO)
   #define DMXSerial Serial1
@@ -29,13 +44,17 @@
 #elif defined(esp32)||defined(ESP_PLATFORM) // oud: #elif defined(esp32-c6-devkitm-1)||defined(ESP_PLATFORM)
   #define DMXSerial Serial1
   const int DMX_TX_PIN = 17; // Set to correct TX pin for your ESP32-C6 board
-  const int DMXDirectionPin = 16;  
+  const int DMXDirectionPin = 16;
 
 #else
   //#error "Unsupported platform for DMX"
 #endif
 
 void DMXstart() {
+  #if defined(ELEMENTIC_DISABLE_DMX)
+    return;
+  #endif
+
   #if defined(ESP32) || defined(ARDUINO_RASPBERRY_PI_PICO)
     DMXSerial.begin(250000, SERIAL_8N2, -1, DMX_TX_PIN);
     pinMode(DMXDirectionPin, OUTPUT);
@@ -44,10 +63,12 @@ void DMXstart() {
     DMXSerial.begin(250000);
     pinMode(DMXDirectionPin, OUTPUT);
     digitalWrite(DMXDirectionPin, HIGH);
-  #elif defined(USE_PORTJ)
+  #elif defined(ARDUINO_ARCH_AVR)
     DMXSerial.begin(250000);
-    DDRJ |= PORTJ_DDR_MASK;     // Set PJ6 as output
-    PORTJ |= PORTJ_DDR_MASK;    // Set HIGH (TX)
+    #if defined(USE_PORTJ)
+      DDRJ |= PORTJ_DDR_MASK;     // Set PJ6 as output
+      PORTJ |= PORTJ_DDR_MASK;    // Set HIGH (TX)
+    #endif
   #endif
 
   for (int n = 0; n < DMX_MAX; n++) {
@@ -62,6 +83,10 @@ void DMXwrite(int channel, uint8_t value) {
 }
 
 void DMXflush() {
+  #if defined(ELEMENTIC_DISABLE_DMX)
+    return;
+  #endif
+
   #if defined(ESP32) || defined(ESP8266) || defined(ARDUINO_RASPBERRY_PI_PICO)
     DMXSerial.updateBaudRate(125000);     // BREAK
     DMXSerial.write((uint8_t)0);
@@ -72,7 +97,7 @@ void DMXflush() {
     DMXSerial.write(DMXBuffer, DMX_MAX);
     DMXSerial.flush();
 
-  #elif defined(USE_PORTJ)
+  #elif defined(ARDUINO_ARCH_AVR)
     DMXSerial.begin(125000);
     DMXSerial.write((uint8_t)0);
     DMXSerial.flush();

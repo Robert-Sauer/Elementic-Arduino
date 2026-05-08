@@ -15,5 +15,16 @@
   "build": {
     "srcDir": "src",
     "includeDir": "include"
-  }
+  },
+  "dependencies": [
+    {
+      "owner": "arduino-libraries",
+      "name": "Ethernet"
+    },
+    {
+      "owner": "knolleary",
+      "name": "PubSubClient"
+    }
+  ]
+  
 }

@@ -1,3 +1,9 @@
+/*
+ * deviceIdentification.h
+ *
+ * Compile-time capability detection for supported boards and network drivers. Maps platforms to Wi-Fi and Ethernet support macros.
+ */
+
 #pragma once
 
 // =============================================================================
@@ -6,7 +12,6 @@
 // - Compile Ethernet on Ethernet-capable platforms (AVR/Wiznet, Teensy, Portenta, Opta)
 // - DEVICEID is runtime/user-facing only (e.g. ELEMENTIC_DEVICEID variable), not required
 // =============================================================================
-
 
 // ------------------------------------------------------------
 // 0) Optional: keep these lists from Excel for runtime logic
@@ -25,7 +30,6 @@
     ((ID) == 11) || ((ID) == 15) || ((ID) == 17) \
 )
 
-
 // ------------------------------------------------------------
 // 1) Driver enums
 // ------------------------------------------------------------
@@ -40,7 +44,6 @@
 #define ELEMENTIC_ETH_DRIVER_OPTA      2   // Opta built-in Ethernet
 #define ELEMENTIC_ETH_DRIVER_PORTENTA  3   // Portenta/PMC Ethernet library
 #define ELEMENTIC_ETH_DRIVER_TEENSY    4   // NativeEthernet (Teensy 4.1)
-
 
 // ------------------------------------------------------------
 // 2) PLATFORM detection → compile-time feature flags
@@ -72,7 +75,6 @@
   #define ELEMENTIC_HAS_WIFI 0
   #define ELEMENTIC_WIFI_DRIVER ELEMENTIC_WIFI_DRIVER_NONE
 #endif
-
 
 // ---- Ethernet capability (compile it only where it exists) ----
 // Default: no Ethernet
@@ -113,12 +115,10 @@
   #define ELEMENTIC_ETH_DRIVER   ELEMENTIC_ETH_DRIVER_OPTA
 #endif
 
-
 // ------------------------------------------------------------
 // 3) Detect whether network at all
 // ------------------------------------------------------------
 #define ELEMENTIC_HAS_NETWORK (ELEMENTIC_HAS_WIFI || ELEMENTIC_HAS_ETHERNET)
-
 
 // ------------------------------------------------------------
 // 4) Optional sanity checks (platform-based)

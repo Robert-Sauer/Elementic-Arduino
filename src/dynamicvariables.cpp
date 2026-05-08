@@ -1,3 +1,9 @@
+/*
+ * dynamicvariables.cpp
+ *
+ * Implements the dynamic variable registry, typed storage accessors, and helper routines for generic configuration values.
+ */
+
 #include "Elementic.h"
 #include <Arduino.h>
 #include <string.h>
@@ -6,13 +12,8 @@
 //    TYPE DEFINITIONS
 // -------------------
 
-
-
 // Calculate total variables
 //const int totalVariables = TOTAL_STRINGS + TOTAL_BYTES + TOTAL_INTS + TOTAL_IPS + TOTAL_PASSWORDS;
-
-
-
 
 // Global array of all variables
 // DynamicVariable variables[totalVariables];
@@ -23,6 +24,7 @@ int byteIndex     = 0;
 int intIndex      = 0;
 int ipIndex       = 0;
 int passwordIndex = 0;
+int boolIndex     = 0;
 
 // -------------------
 //   HELPER FUNCTIONS
@@ -30,12 +32,14 @@ int passwordIndex = 0;
 
 // Find the index of a variable by name
 int findVariableIndexByName(const String& varName) {
+    if (varName.length() == 0) return -1;
+
     for (int i = 0; i < totalVariables; i++) {
-        if (variables[i].name == varName) {
+        if (variables[i].name.length() > 0 && variables[i].name == varName) {
             return i;
         }
     }
-    return -1; // not found
+    return -1;
 }
 
 // -------------------
@@ -72,7 +76,6 @@ void DefineString(const String& varName, const char val[20], int priority) {
 //        Serial.println("No more space for strings!");
 //    }
 //}
-
 
 void DefineByte(const String& varName, byte val, int priority) {
     if (byteIndex < TOTAL_BYTES) {
@@ -124,11 +127,24 @@ void DefinePassword(const String& varName, const char* val, int priority) {
         //variables[idx].value.passVal = strdup(val);
         strncpy(variables[idx].value.passVal, val, MAX_STRING_LENGTH - 1);
 variables[idx].value.passVal[MAX_STRING_LENGTH - 1] = '\0';
-        
+
         variables[idx].priority = priority;
         passwordIndex++;
     } else {
         Serial.println("No more space for Passwords!");
+    }
+}
+
+void DefineBool(const String& varName, bool val, int priority) {
+    if (boolIndex < TOTAL_BOOLS) {
+        int idx = TOTAL_STRINGS + TOTAL_BYTES + TOTAL_INTS + TOTAL_IPS + TOTAL_PASSWORDS + boolIndex;
+        variables[idx].type = DYNAMIC_BOOL;
+        variables[idx].name = varName;
+        variables[idx].value.byteVal = val ? 1 : 0;
+        variables[idx].priority = priority;
+        boolIndex++;
+    } else {
+        Serial.println("No more space for bools!");
     }
 }
 
@@ -141,13 +157,8 @@ bool SetStringValue(const String& varName, const char* newVal) {
     if (idx == -1) return false;
 
     if (variables[idx].type == DYNAMIC_STRING) {
-        // Free old memory if any
-        if (variables[idx].value.strVal != NULL) {
-            free(variables[idx].value.strVal);
-        }
-        //variables[idx].value.strVal = strdup(newVal);
         strncpy(variables[idx].value.strVal, newVal, MAX_STRING_LENGTH - 1);
-        variables[idx].value.strVal[MAX_STRING_LENGTH - 1] = '\0'; // Always null-terminate
+        variables[idx].value.strVal[MAX_STRING_LENGTH - 1] = '\0';
         return true;
     }
     return false;
@@ -194,10 +205,6 @@ bool SetPasswordValue(const String& varName, const char* newVal) {
     if (idx == -1) return false;
 
     if (variables[idx].type == DYNAMIC_PASSWORD) {
-        if (variables[idx].value.passVal != NULL) {
-            free(variables[idx].value.passVal);
-        }
-        //variables[idx].value.passVal = strdup(newVal);
         strncpy(variables[idx].value.passVal, newVal, MAX_STRING_LENGTH - 1);
         variables[idx].value.passVal[MAX_STRING_LENGTH - 1] = '\0';
         return true;
@@ -205,13 +212,24 @@ bool SetPasswordValue(const String& varName, const char* newVal) {
     return false;
 }
 
+bool SetBoolValue(const String& varName, bool newVal) {
+    int idx = findVariableIndexByName(varName);
+    if (idx == -1) return false;
+
+    if (variables[idx].type == DYNAMIC_BOOL) {
+        variables[idx].value.byteVal = newVal ? 1 : 0;
+        return true;
+    }
+    return false;
+}
+
 // -------------------
-//    GET FUNCTIONS 
+//    GET FUNCTIONS
 // (each returns only the value)
 // -------------------
 
 /*
- * If the variable isn't found or has a different type, 
+ * If the variable isn't found or has a different type,
  * we return a "safe default":
  *   - "" for strings/password
  *   - 0 for byte/int
@@ -220,11 +238,11 @@ bool SetPasswordValue(const String& varName, const char* newVal) {
 
 String GetStringValue(const String& varName) {
     int idx = findVariableIndexByName(varName);
-    if (idx == -1) return ""; 
+    if (idx == -1) return "";
     if (variables[idx].type == DYNAMIC_STRING && variables[idx].value.strVal != NULL) {
         return String(variables[idx].value.strVal);
     }
-    return ""; 
+    return "";
 }
 
 byte GetByteValue(const String& varName) {
@@ -251,7 +269,7 @@ int GetIntValue(const String& varName) {
 //     if (idx == -1) return "0.0.0.0";
 //     if (variables[idx].type == DYNAMIC_IP) {
 //         byte* ip = variables[idx].value.ipVal;
-//         return String(ip[0]) + "." + String(ip[1]) + "." + 
+//         return String(ip[0]) + "." + String(ip[1]) + "." +
 //                String(ip[2]) + "." + String(ip[3]);
 //     }
 //     return "0.0.0.0";
@@ -273,6 +291,15 @@ String GetPasswordValue(const String& varName) {
         return String(variables[idx].value.passVal);
     }
     return "";
+}
+
+bool GetBoolValue(const String& varName) {
+    int idx = findVariableIndexByName(varName);
+    if (idx == -1) return false;
+    if (variables[idx].type == DYNAMIC_BOOL) {
+        return variables[idx].value.byteVal != 0;
+    }
+    return false;
 }
 
 // ----------------------
@@ -299,14 +326,10 @@ int compareByPriority(const void *a, const void *b) {
 }
 
 void ProcessVariablesByPriority(void (*action)(DynamicVariable &)) {
-    // Sort the array in place
-    qsort(variables, totalVariables, sizeof(DynamicVariable), compareByPriority);
-
-    // Then run the action on each variable
-    for (int i = 0; i < totalVariables; i++) {
-        // If a variable has an empty name, it may not be defined
-        if (variables[i].name.length() > 0) {
-            action(variables[i]);
+    for (int targetPriority = 1; targetPriority <= PriorityCounter; targetPriority++) {
+        int idx = findVariableIndexByPriority(targetPriority);
+        if (idx >= 0 && idx < totalVariables && variables[idx].name.length() > 0) {
+            action(variables[idx]);
         }
     }
 }
@@ -338,15 +361,17 @@ void exampleAction(DynamicVariable &var) {
         case DYNAMIC_PASSWORD:
             Serial.println(var.value.passVal);
             break;
+        case DYNAMIC_BOOL:
+            Serial.println(var.value.byteVal ? "true" : "false");
+            break;
     }
 }
 
 int findVariableIndexByPriority(int targetPriority) {
     for (int i = 0; i < totalVariables; i++) {
-        // Optionally, check if this variable is defined (e.g., non-empty name)
         if (variables[i].name.length() > 0 && variables[i].priority == targetPriority) {
-            return i; // Found the matching variable
+            return i;
         }
     }
-    return -1; // No variable with the target priority found
+    return -1;
 }

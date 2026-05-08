@@ -1,4 +1,7 @@
-// This contains all code to configure Elementic
-// - Serial
-// - Bluetooth (To Be Developped)
+/*
+ * externalInterfaceConfiguration.cpp
+ *
+ * Reserved source file for configuration of external interfaces such as serial, Bluetooth, and future network transports.
+ */
+
 // - TCP/IP (To Be Developped)

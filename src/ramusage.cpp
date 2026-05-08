@@ -1,7 +1,9 @@
-// ------------------------------------------------------------
-//   Cross-platform "free RAM" function for Elementic Library
-//   Works on AVR, ESP32, ESP8266, SAMD, RP2040, STM32, etc.
-// ------------------------------------------------------------
+/*
+ * ramusage.cpp
+ *
+ * Implements a cross-platform helper that reports approximate free RAM for the supported microcontroller families.
+ */
+
 #include "Elementic.h"
 #if defined(ARDUINO_ARCH_AVR)
 

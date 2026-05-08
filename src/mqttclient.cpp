@@ -1,8 +1,13 @@
+/*
+ * mqttclient.cpp
+ *
+ * Implements MQTT connection management, subscriptions, callbacks, and message publishing helpers for supported platforms.
+ */
+
 #include <Arduino.h>
 #include <PubSubClient.h>
 #include "Elementic.h"
 #include "deviceIdentification.h"
-
 
 #if ELEMENTIC_HAS_WIFI
   #if (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_ESP8266)
@@ -20,19 +25,16 @@
   #include <Ethernet.h>   // or Ethernet2/Ethernet3 depending on your stack
 #endif
 
-
 bool parseIP(const String& ipStr, IPAddress &ip) {
   // Helper: parse "192.168.1.4" into IPAddress
   int parts[4] = {0,0,0,0};
-  if (sscanf(ipStr.c_str(), "%d.%d.%d.%d", 
+  if (sscanf(ipStr.c_str(), "%d.%d.%d.%d",
              &parts[0], &parts[1], &parts[2], &parts[3]) == 4) {
     ip = IPAddress(parts[0], parts[1], parts[2], parts[3]);
     return true;
   }
   return false;
 }
-
-
 
 void reconnect() {//-----------------------Reconnect-----------------------
   static uint32_t lastAttemptMs = 0;
@@ -105,13 +107,18 @@ void reconnect() {//-----------------------Reconnect-----------------------
   yield();
 }
 
+void MQTTSetupVariables(){
+  DefineString("MQTTName", MQTTName, PriorityCounter++);
+  DefineString("MQTTServer", MQTTServer, PriorityCounter++);
+  DefineString("MQTTUsername", MQTTUsername, PriorityCounter++);
+  DefinePassword("MQTTPassword", MQTTPassword, PriorityCounter++);
+}
 
-void MQTTSetup(){//-----------------------MQTT Setup-----------------------
+void MQTTSetupClient(){//-----------------------MQTT Setup-----------------------
+
   mqttClient.setCallback(callback);
-
   mqttClient.setKeepAlive(60);
   mqttClient.setSocketTimeout(5);
-
   // IMPORTANT: check success
   bool ok = mqttClient.setBufferSize(512);
   if (!ok) {
@@ -156,8 +163,6 @@ void SendOutputValueMQTT(byte id) {
   mqttClient.publish(msgmqtt, msgmqtt2);
 }
 
-
-
 void callback(char* topic, byte* payload, unsigned int length) {//-----------------------Callback-----------------------
 
   // 1) Safe log (OPTIONAL: you can comment out entirely to reduce load)
@@ -177,13 +182,11 @@ void callback(char* topic, byte* payload, unsigned int length) {//--------------
   // 3) Clamp OutputCounter to prevent OOB even if corrupted
   byte maxOut = OutputCounter;
   if (maxOut > OutputChannels) maxOut = OutputChannels;
-  
-
 
   for (byte i = 1; i <= maxOut; ++i) {
     //  snprintf(msgmqtt2, sizeof(msgmqtt2), "Callback Output id: %d of total of %d ids", i, maxOut);
     //  logging(LOG_INFO, msgmqtt2);
-    
+
     const char* base = MQTT_Output[i];
     if (!base || base[0] == '\0') continue;
 
@@ -198,7 +201,7 @@ void callback(char* topic, byte* payload, unsigned int length) {//--------------
 
     // ----- on/off (…/onoff_set) -----
     if (streq_P(suffix, onoffset)) {
-      
+
       // logging(LOG_INFO, "Callback on-off");
       bool turnOn = (strcasecmp(pbuf, "ON") == 0) || (pval > 0);
 
@@ -331,5 +334,3 @@ void MQTTLoop() {
 #endif
   }
 }
-
-

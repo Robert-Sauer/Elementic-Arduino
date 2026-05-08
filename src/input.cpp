@@ -1,8 +1,11 @@
+/*
+ * input.cpp
+ *
+ * Implements input scanning, button state handling, and input-to-output actions driven by the Elementic mapping matrix.
+ */
+
 #include <Arduino.h>
 #include "Elementic.h"
-
-
-
 
 void input(){
 for (uint8_t i=1; i <= SwitchCounter; i++){
@@ -35,20 +38,18 @@ for (uint8_t i=1; i <= SwitchCounter; i++){
                         }
                     }
                 if(OutputType[InOutMatrix[i][j]]==3){ //RGB DMX
-                    
 
                     }
-                }            
+                }
             }
 
         else
             {
             SwitchTimer[i]++;
- 
+
             for (uint8_t j = 0; j < InOutMatrixCouter[i]; j++)
-                {              
+                {
                  if(OutputType[InOutMatrix[i][j]]==1||OutputType[InOutMatrix[i][j]]==5||OutputType[InOutMatrix[i][j]]==7){ //Lamp aan/uit, //Lamp aan/uit (Ext.) + 15-12-2025 Signal Pulse
-                    
 
                     }
                 if(OutputType[InOutMatrix[i][j]]==2||OutputType[InOutMatrix[i][j]]==4||OutputType[InOutMatrix[i][j]]==6){//Lamp PWM, LAMP DMX, Lamp PWM (Ext.)
@@ -74,9 +75,9 @@ for (uint8_t i=1; i <= SwitchCounter; i++){
                         if(OutputType[InOutMatrix[i][j]]==2||OutputType[InOutMatrix[i][j]]==4){ // 29-03-2020 - hier geplaatst om bij output weg te halen
                             MQTTUpdate[InOutMatrix[i][j]] = true;
                             }
-                        
+
                         SendOutputValueSerial(InOutMatrix[i][j], OutputValueActual[InOutMatrix[i][j]]);
-                        }                            
+                        }
                     }
                 if(OutputType[InOutMatrix[i][j]]==3) //RGB DMX
                     {
@@ -138,8 +139,8 @@ for (uint8_t i=1; i <= SwitchCounter; i++){
                     }
                 if(OutputType[InOutMatrix[i][j]]==2||OutputType[InOutMatrix[i][j]]==4){ // 29-03-2020 - hier geplaatst om bij output weg te halen
                     MQTTUpdate[InOutMatrix[i][j]] = true;
-                    }         
-                }  
+                    }
+                }
             MQTTBurstProtection=0;
             Serial.print("Switch released: ");
             Serial.print(i);
@@ -147,7 +148,6 @@ for (uint8_t i=1; i <= SwitchCounter; i++){
             Serial.println(SwitchTimer[i]);
             mqttClient.publish(MQTT_Input[i],"RELEASED");
 
-            
             SwitchPressed[i] = false;
             SwitchTimer[i] = 0;
             }

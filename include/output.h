@@ -1,3 +1,9 @@
+/*
+ * output.h
+ *
+ * Declarations for output handling, relay updates, and MQTT topic helpers used by the output control module.
+ */
+
 #pragma once
 #include <stdint.h>
 #include "mqttstrings.h"
@@ -55,5 +61,3 @@
 
 // // General burst protection
 // extern int MQTTBurstProtection;
-
-

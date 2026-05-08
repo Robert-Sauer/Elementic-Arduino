@@ -1,3 +1,9 @@
+/*
+ * elementic_defaults.cpp
+ *
+ * Provides default definitions for optional globals expected by the library when they are not supplied elsewhere.
+ */
+
 #include <Arduino.h>
 #include <Elementic.h>
 
@@ -8,14 +14,6 @@
 // Logging switches (referenced by logging.cpp)
 bool logtoMQTT  = false;
 bool logtoSerial = true;
-
-// Common counters (referenced by mqttclient.cpp / other modules)
-// int loopcounter  = 0;
-// int loopcounter2 = 0;
-// int loopcounter3 = 0;
-// int loopcounter4 = 0;
-// int MQTTMessages = 0;
-// int backlighttimer = 0;
 
 unsigned long delayTime = 0;
 

@@ -1,3 +1,9 @@
+/*
+ * serial.cpp
+ *
+ * Implements the Elementic serial protocol, including framing, EEPROM serialization, variable synchronization, and command handling.
+ */
+
 #include <Arduino.h>
 #include "Elementic.h"
 #include <EEPROM.h>
@@ -36,94 +42,124 @@ void serialPrintLimited(char data[400]) {
 }
 
 int DynamicVariableActions(int EP, bool ER, bool SD, bool MEM, DynamicVariable &var,int varId) {
+    const byte serialId = (byte)var.priority;   // app protocol id
+    const byte storageId = (byte)varId;         // EEPROM/internal storage index
+
     // Write variable type block ("Type")
     if (SD) { serialPrintLimited("S02"); }
-    if (SD) { serialwrite(2); }    //if (ER) { EEPROM.write(EP++, (byte)2); } // Type1: Generic
-    if (SD) { serialwrite(0); }    //if (ER) { EEPROM.write(EP++, (byte)0); } // Type2: Type
-    if (SD) { serialwrite(var.priority); } //if (ER) { EEPROM.write(EP++, (byte)var.priority); } // id
-    if (SD) { serialwrite(0); }    //if (ER) { EEPROM.write(EP++, (byte)0); } // length not required
-    if (SD) { serialwrite((byte)var.type); } //if (ER) { EEPROM.write(EP++, (byte)var.type); } // value
+    if (SD) { serialwrite(2); }
+    if (SD) { serialwrite(0); }
+    if (SD) { serialwrite(serialId); }
+    if (SD) { serialwrite(1); }
+    if (SD) { serialwrite((byte)var.type); }
+    if (ER) {
+        EEPROM.write(EP++, (byte)2);
+        EEPROM.write(EP++, (byte)0);
+        EEPROM.write(EP++, storageId);
+        EEPROM.write(EP++, (byte)1);
+        EEPROM.write(EP++, (byte)var.type);
+    }
     if (SD) { serialPrintLimited("E02"); }
-    
-    
+
     // Write variable Name block
-    if (SD) { serialPrintLimited("S02"); }
-    if (SD) { serialwrite(2); }    //if (ER) { EEPROM.write(EP++, (byte)2); } // Type1: Generic
-    if (SD) { serialwrite(1); }    //if (ER) { EEPROM.write(EP++, (byte)1); } // Type2: Name
-    if (SD) { serialwrite(var.priority); } //if (ER) { EEPROM.write(EP++, (byte)var.priority); } // id
-    // Write string length for name
     size_t nameLen = strlen(var.name.c_str());
-    if (SD) { serialwrite((byte)nameLen); } 
-    //if (ER) { EEPROM.write(EP++, (byte)nameLen); }
-    // Write the name bytes
-    if (SD) { Serial.write(var.name.c_str(), nameLen); } 
-    //if (ER) {
-    //    for (int i2 = 0; i2 < nameLen; i2++) {
-    //        EEPROM.write(EP++, var.name.c_str()[i2]);
-    //    }
-    //}
+    if (SD) { serialPrintLimited("S02"); }
+    if (SD) { serialwrite(2); }
+    if (SD) { serialwrite(1); }
+    if (SD) { serialwrite(serialId); }
+    if (SD) { serialwrite((byte)nameLen); }
+    if (SD) { Serial.write(var.name.c_str(), nameLen); }
+    if (ER) {
+        EEPROM.write(EP++, (byte)2);
+        EEPROM.write(EP++, (byte)1);
+        EEPROM.write(EP++, storageId);
+        EEPROM.write(EP++, (byte)nameLen);
+        for (size_t i2 = 0; i2 < nameLen; i2++) {
+            EEPROM.write(EP++, (byte)var.name.c_str()[i2]);
+        }
+    }
     if (SD) { serialPrintLimited("E02"); }
 
     // Write variable Value block
     if (SD) { serialPrintLimited("S02"); }
-    if (SD) { serialwrite(2); }    if (ER) { EEPROM.write(EP++, (byte)2); } // Type1: Generic
-    if (SD) { serialwrite(2); }    if (ER) { EEPROM.write(EP++, (byte)2); } // Type2: Value
-    if (SD) { serialwrite(var.priority); } if (ER) { EEPROM.write(EP++, (byte)varId); } // id
+    if (SD) { serialwrite(2); }
+    if (SD) { serialwrite(2); }
+    if (SD) { serialwrite(serialId); }
+    if (ER) {
+        EEPROM.write(EP++, (byte)2);
+        EEPROM.write(EP++, (byte)2);
+        EEPROM.write(EP++, storageId);
+    }
 
     switch (var.type) {
         case DYNAMIC_STRING: {
             size_t strLen = strlen(var.value.strVal);
-            if (SD) { serialwrite((byte)strLen); } 
-            if (ER) { EEPROM.write(EP++, (byte)strLen); }
+            if (SD) { serialwrite((byte)strLen); }
             if (SD) { serialPrintLimited(var.value.strVal); }
             if (ER) {
-                for (int i2 = 0; i2 < strLen; i2++) {
-                    EEPROM.write(EP++, var.value.strVal[i2]);
+                EEPROM.write(EP++, (byte)strLen);
+                for (size_t i2 = 0; i2 < strLen; i2++) {
+                    EEPROM.write(EP++, (byte)var.value.strVal[i2]);
                 }
             }
             break;
         }
         case DYNAMIC_BYTE:
-            if (SD) { serialwrite(0); }    if (ER) { EEPROM.write(EP++, (byte)0); }
-            if (SD) { serialwrite(var.value.byteVal); } 
-            if (ER) { EEPROM.write(EP++, (byte)var.value.byteVal); }
+            if (SD) { serialwrite(1); }
+            if (SD) { serialwrite(var.value.byteVal); }
+            if (ER) {
+                EEPROM.write(EP++, (byte)1);
+                EEPROM.write(EP++, (byte)var.value.byteVal);
+            }
             break;
-        case DYNAMIC_INT: {
-            if (SD) { serialwrite(0); }    if (ER) { EEPROM.write(EP++, (byte)0); } // 16-04-2024 length
-            // Write 2-byte integer (high byte first)
+        case DYNAMIC_INT:
+            if (SD) { serialwrite(2); }
             if (SD) {
                 serialwrite((byte)(var.value.intVal >> 8));
-                serialwrite((byte)(var.value.intVal & 0xFF));   // FIX: was & 0x00
+                serialwrite((byte)(var.value.intVal & 0xFF));
             }
             if (ER) {
+                EEPROM.write(EP++, (byte)2);
                 EEPROM.write(EP++, (byte)(var.value.intVal >> 8));
-                EEPROM.write(EP++, (byte)(var.value.intVal & 0xFF)); // FIX: was & 0x00
+                EEPROM.write(EP++, (byte)(var.value.intVal & 0xFF));
             }
             break;
-        }
         case DYNAMIC_IP:
-            if (SD) { serialwrite(0); } if (ER) { EEPROM.write(EP++, (byte)0); }// length not required, added ER 0 16-04-2025
+            if (SD) { serialwrite(4); }
             for (int i = 0; i < 4; i++) {
-                if (SD) { serialwrite(var.value.ipVal[i]); } 
-                if (ER) { EEPROM.write(EP++, (byte)var.value.ipVal[i]); }
+                if (SD) { serialwrite(var.value.ipVal[i]); }
+            }
+            if (ER) {
+                EEPROM.write(EP++, (byte)4);
+                for (int i = 0; i < 4; i++) {
+                    EEPROM.write(EP++, (byte)var.value.ipVal[i]);
+                }
             }
             break;
         case DYNAMIC_PASSWORD: {
             size_t passLen = strlen(var.value.passVal);
-            if (SD) { serialwrite((byte)passLen); } 
-            if (ER) { EEPROM.write(EP++, (byte)passLen); }
+            if (SD) { serialwrite((byte)passLen); }
             if (SD) { serialPrintLimited(var.value.passVal); }
             if (ER) {
-                for (int i2 = 0; i2 < passLen; i2++) {
-                    EEPROM.write(EP++, var.value.passVal[i2]);
+                EEPROM.write(EP++, (byte)passLen);
+                for (size_t i2 = 0; i2 < passLen; i2++) {
+                    EEPROM.write(EP++, (byte)var.value.passVal[i2]);
                 }
             }
             break;
         }
+        case DYNAMIC_BOOL:
+            if (SD) { serialwrite(1); }
+            if (SD) { serialwrite(var.value.byteVal ? 1 : 0); }
+            if (ER) {
+                EEPROM.write(EP++, (byte)1);
+                EEPROM.write(EP++, (byte)(var.value.byteVal ? 1 : 0));
+            }
+            break;
     }
     if (SD) { serialPrintLimited("E02"); }
-    
-    return EP;  // Return the updated pointer
+
+    return EP;
 }
 
 void SendAllData(bool ER, bool SD, bool MEM) { // ER = store to EEPROM, SD = send via Serial, MEM = reserved for MEM
@@ -131,7 +167,7 @@ void SendAllData(bool ER, bool SD, bool MEM) { // ER = store to EEPROM, SD = sen
     if (ER) { snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/LOG"); }
     int EP = 0; // EEPROM pointer
     char tempstring[20];
-    
+
     if (SD) { serialPrintLimited("S01"); } // Initiate frame
     if (SD) { serialPrintLimited("1"); }    if (ER) { EEPROM.write(EP++, (byte)1); } // Type
     if (SD) { serialPrintLimited("1"); }    if (ER) { EEPROM.write(EP++, (byte)1); } // Version
@@ -298,7 +334,7 @@ void SendAllData(bool ER, bool SD, bool MEM) { // ER = store to EEPROM, SD = sen
         if (SD) { serialwrite(0); }   if (ER) { EEPROM.write(EP++, (byte)0); }
         if (SD) { serialwrite((byte)OutputMinValue[i]); } if (ER) { EEPROM.write(EP++, (byte)OutputMinValue[i]); }
         if (SD) { serialPrintLimited("E02"); }
-        
+
         // Maxvalue
         if (SD) { serialPrintLimited("S02"); }
         if (SD) { serialwrite(0); }   if (ER) { EEPROM.write(EP++, (byte)0); }
@@ -325,7 +361,7 @@ void SendAllData(bool ER, bool SD, bool MEM) { // ER = store to EEPROM, SD = sen
 
         size_t tempLen = strlen(Output_Name[i]);
 
-        if (SD) { serialwrite((byte)tempLen); } 
+        if (SD) { serialwrite((byte)tempLen); }
         if (ER) { EEPROM.write(EP++, (byte)tempLen); }
         if (SD) { serialPrintLimited(Output_Name[i]); }
         if (ER) {
@@ -399,7 +435,7 @@ void ReadAllDataFromEEPROM() {
     // Read type and version
     type = EEPROM.read(EP++);
     version = EEPROM.read(EP++);
-    
+
     char debugBuf[100];
     sprintf(debugBuf, "Type: %d, Version: %d", type, version);
     // mqttClient.publish(msgmqtt, debugBuf);
@@ -516,7 +552,7 @@ void ReadAllDataFromEEPROM() {
                         EP += length;
                         sprintf(debugBuf, "Unknown output block. Skipped %d bytes.", length);
                         logging(LOG_CAUTION,debugBuf);
-                        
+
                         break;
                 }
                 break;
@@ -577,9 +613,9 @@ void ReadAllDataFromEEPROM() {
                 }
                 break;
             case 2: { // Generic variables
+                if (id >= totalVariables) { EP += length; break; } // storage index
                 sprintf(debugBuf, "EEPROM READ Case 2(step 1), type: [%d]",variables[id].type);
                 mqttClient.publish(msgmqtt, debugBuf);
-                if (id >= totalVariables) break; // Safety check
                 switch (type02) {
                     case 0: {
                         byte val = EEPROM.read(EP++);
@@ -660,6 +696,13 @@ void ReadAllDataFromEEPROM() {
                                 logging(LOG_INFO,debugBuf);
                                 break;
                             }
+                            case DYNAMIC_BOOL: {
+                                byte boolVal = EEPROM.read(EP++);
+                                variables[id].value.byteVal = (boolVal != 0) ? 1 : 0;
+                                sprintf(debugBuf, "Variable[%d] Value (Bool) = %d", id, variables[id].value.byteVal);
+                                logging(LOG_INFO,debugBuf);
+                                break;
+                            }
                         }
                         break;
                     }
@@ -677,7 +720,7 @@ void ReadAllDataFromEEPROM() {
                 // [type01][type02][valueLow][valueHigh]
                 // We already consumed those into type01, type02, id, length.
                 // Use 'id' as the low byte and do NOT read extra bytes.
-                int val = (EEPROM.read(EP + 1) << 8) | EEPROM.read(EP); 
+                int val = (EEPROM.read(EP + 1) << 8) | EEPROM.read(EP);
                 EP += 2;
 
                 switch (type02) {
@@ -729,8 +772,6 @@ void SendOutputValueSerial(byte id, byte value) {
     Serial.print("E01");
 }
 
-
-
 void SendSystem(SystemType systemTypeVal, int value) {
     Serial.print("S01"); // Initiate
     Serial.print("S02"); // Marker
@@ -741,6 +782,41 @@ void SendSystem(SystemType systemTypeVal, int value) {
     // Write 2-byte value
     serialwrite((byte)(value & 0xFF));   // low byte first
     serialwrite((byte)(value >> 8));     // high byte second
+    Serial.print("E02");
+    Serial.print("E01");
+}
+
+void SendStatus(byte type1, byte protocolId, byte statusValue) {
+    byte protocolType01 = 0;
+    byte protocolType02 = 0;
+
+    switch (type1) {
+        case VARIABLE_OUTPUT:
+            protocolType01 = 0;
+            protocolType02 = 9;
+            break;
+
+        case VARIABLE_INPUT:
+            protocolType01 = 1;
+            protocolType02 = 6;
+            break;
+
+        case VARIABLE_DYNAMIC:
+            protocolType01 = 2;
+            protocolType02 = 5;
+            break;
+
+        default:
+            return;
+    }
+
+    Serial.print("S01");
+    Serial.print("S02");
+    serialwrite(protocolType01);
+    serialwrite(protocolType02);
+    serialwrite(protocolId);
+    serialwrite((byte)1);
+    serialwrite(statusValue);
     Serial.print("E02");
     Serial.print("E01");
 }
@@ -768,7 +844,7 @@ void serialloop() {
         if (data_index < MAX_SERIAL_BUFFER) {
             incomingdata[data_index++] = byteValue;
         } else {
-            
+
             logging(LOG_CAUTION,"Warning: Serial buffer overflow");
             clearIncomingData();
         }
@@ -827,7 +903,7 @@ void serialloop() {
         // logging(LOG_INFO,msgmqtt2);
 
         if (counter >= endPos) break;
-        
+
         // Apply data based on header values:
         byte Value;
         switch (Type01) {
@@ -838,38 +914,38 @@ void serialloop() {
                     OutputCounter=id;
                 }
 
-
                 // snprintf(msgmqtt2, sizeof(msgmqtt2), "Received updated for Type 2: TYPE01=%d, TYPE02=%d, ID=%d, LENGTH=%d ", Type01, Type02, id,length2);
                 // logging(LOG_INFO,msgmqtt2);
                 switch (Type02) {
                     case 0: { //channel/pin
                         Value = incomingdata[counter++];
-                        OutputPin[id] = Value; 
+                        OutputPin[id] = Value;
                         break;
                     }
                     case 1: { //Type
                         Value = incomingdata[counter++];
-                        OutputType[id] = Value; 
+                        OutputType[id] = Value;
                         break;
                     }
                     case 2: { //Relay
                         Value = incomingdata[counter++];
-                        OutputRelay[id] = Value; 
+                        OutputRelay[id] = Value;
+                        setrelays();
                         break;
                     }
                     case 3: { // MinValue
                         Value = incomingdata[counter++];
-                        OutputMinValue[id] = Value; 
+                        OutputMinValue[id] = Value;
                         break;
                     }
                     case 4: { // MaxValue
                         Value = incomingdata[counter++];
-                        OutputMaxValue[id] = Value; 
+                        OutputMaxValue[id] = Value;
                         break;
                     }
                     case 5: { // DefaultValue
                         Value = incomingdata[counter++];
-                        OutputDefaultValue[id] = Value; 
+                        OutputDefaultValue[id] = Value;
                         break;
                     }
                     case 6:{ //07-11-2025: Name
@@ -881,7 +957,7 @@ void serialloop() {
                             // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/RECEIVEDDATATYPENAme");
                             snprintf(msgmqtt2, sizeof(msgmqtt2), "Received updated for Type 2: TYPE01=%d, TYPE02=%d, ID=%d, LENGTH=%d, name:%s ", Type01, Type02, id,length2, Output_Name[id]);
                             logging(LOG_INFO,msgmqtt2);
-                        break; 
+                        break;
                     }
                     case 7: {//07-11-2025: Topic
                         for(int i2=0;i2<length2;i2++)
@@ -891,14 +967,14 @@ void serialloop() {
                             }
                         snprintf(msgmqtt2, sizeof(msgmqtt2), "Received updated for Type 2: TYPE01=%d, TYPE02=%d, ID=%d, LENGTH=%d, name:%s ", Type01, Type02, id,length2, MQTT_Output[id]);
                         logging(LOG_INFO,msgmqtt2);
-                        break; 
+                        break;
                     }
                     case 8: { // Value
                         Value = incomingdata[counter++];
                         OutputValueActual[id] = Value;
                         SendOutputValueMQTT(id);
                         // strcpy_P(suffixBuf, dimvalue_status); ///////// going wrong when not dimmable!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Make cases for each output type or move to output, but requires a new memory array
-                        // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[id], suffixBuf); 
+                        // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[id], suffixBuf);
                         // snprintf(msgmqtt2, 20 ,"%d",Value);
                         // mqttClient.publish(msgmqtt, msgmqtt2);
 
@@ -915,7 +991,7 @@ void serialloop() {
                 // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/OUTPUT");
                 // snprintf(msgmqtt2, sizeof(msgmqtt2), "Output updated: id=%d, Type=%d, Value=%d", id, Type02, Value);
                 // logging(LOG_INFO,msgmqtt2);
-                
+
                 break;
             case 1: // Input
                 //Value = incomingdata[counter++];
@@ -924,7 +1000,7 @@ void serialloop() {
                 }
                 switch (Type02) {
                     case 0: {
-                        SwitchPin[id] = incomingdata[counter++]; 
+                        SwitchPin[id] = incomingdata[counter++];
                         break;
                         // Extend if needed for additional input subtypes
                     }
@@ -947,14 +1023,14 @@ void serialloop() {
                     break;
                     }
                     case 3: //Type 0:on/off, 1:temperature
-                    {   
+                    {
                         break;
                     }
                     case 4: //Value
                     {
                         uint8_t highByte = incomingdata[counter++];
                         uint8_t lowByte  = incomingdata[counter++];
-                        int value = (highByte << 8) | lowByte; 
+                        int value = (highByte << 8) | lowByte;
                         if (value==0){
                             SwitchPressedExternal[id]=false;
                         }
@@ -975,7 +1051,7 @@ void serialloop() {
                         logging(LOG_INFO,msgmqtt2);
                         break;
                     }
-                    default: 
+                    default:
                     {
                         break;
                     }
@@ -983,94 +1059,102 @@ void serialloop() {
 
                 break;
             case 2: // Generic
-                
+
                 switch (Type02) {
                     case 0: break; // should not be changable externally
                     case 1: break; // should not be changable externally
-                    case 2: //only type 2 can contain data
-                        {
-                            int priority = findVariableIndexByPriority(id);
-                            int generictype = (int) variables[priority].type;
-                            // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/GENERICTYPE");
-                            snprintf(msgmqtt2, sizeof(msgmqtt2), "Generic Typeof id=%d, Type=%d", id, generictype);
-                            logging(LOG_INFO,msgmqtt2);
-                            //switch (generictype) {
-                            //    case DYNAMIC_BYTE:
-                            if(variables[priority].type == DYNAMIC_BYTE){
-                                    Value = incomingdata[counter++]; 
-                                    variables[id].value.byteVal = Value;
-                                    // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/GENERIC");
-                                    snprintf(msgmqtt2, sizeof(msgmqtt2), "Generic BYTE updated: id=%d, Value=%d", priority, Value);
-                                    logging(LOG_INFO,msgmqtt2);
-                                }
-                            //        break;
-                            //    case DYNAMIC_INT:
-                            if(variables[priority].type == DYNAMIC_INT){                    
-                                    byte ValueHigh = incomingdata[counter++]; 
-                                    byte ValueLow = incomingdata[counter++]; 
-                                    variables[id].value.intVal = ((int)ValueHigh << 8) | ValueLow;
-                                    // MQTT post for Generic INT update
-                                    // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/GENERIC");
-                                    snprintf(msgmqtt2, sizeof(msgmqtt2), "Generic INT updated: id=%d, ValueHigh=%d, ValueLow=%d, Combined=%d", priority, ValueHigh, ValueLow, variables[id].value.intVal);
-                                    logging(LOG_INFO,msgmqtt2);
-                                }
-                            //        break;
-                            //    case DYNAMIC_IP:
-                            if(variables[priority].type == DYNAMIC_IP){
-                                    // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/GENERICBefore");
-                                    snprintf(msgmqtt2, sizeof(msgmqtt2), "Generic IP updated: id=%d", priority);
-                                    logging(LOG_INFO,msgmqtt2);
-                                    byte IPAddress[4];
-                                    IPAddress[0] = incomingdata[counter++];
-                                    IPAddress[1] = incomingdata[counter++];
-                                    IPAddress[2] = incomingdata[counter++];
-                                    IPAddress[3] = incomingdata[counter++];
-                                    variables[priority].value.ipVal[0] = IPAddress[0];
-                                    variables[priority].value.ipVal[1] = IPAddress[1];
-                                    variables[priority].value.ipVal[2] = IPAddress[2];
-                                    variables[priority].value.ipVal[3] = IPAddress[3];
-                                    // MQTT post for Generic IP update
-                                    // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/GENERICAfter");
-                                    snprintf(msgmqtt2, sizeof(msgmqtt2), "Generic IP updated: id=%d, IP=%d.%d.%d.%d", priority, IPAddress[0], IPAddress[1], IPAddress[2], IPAddress[3]);
-                                    logging(LOG_INFO,msgmqtt2);
-                                }
-                            //    case DYNAMIC_String:
-                            if(variables[priority].type == DYNAMIC_STRING||variables[priority].type == DYNAMIC_PASSWORD){
-                                // mqttClient.publish(msgmqtt, msgmqtt2);
-                                char ReceivedString[30];
-                                memset(ReceivedString, 0, sizeof(ReceivedString));
-                                byte i2;
-                                for(i2=0;i2<length2&&i2<sizeof(ReceivedString)-1;i2++)
-                                    {
-                                        ReceivedString[i2] = (char)incomingdata[counter++];
-                                    }
-                                
-                                ReceivedString[i2] = '\0';
-
-                                if(variables[priority].type == DYNAMIC_STRING){
-                                    strcpy(variables[priority].value.strVal, ReceivedString);
-                                    }
-                                if(variables[priority].type == DYNAMIC_PASSWORD){
-                                    strcpy(variables[priority].value.passVal, ReceivedString);
-                                    }
-                                // MQTT post for Generic IP update
-                                // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/GENERIC");
-                                snprintf(msgmqtt2, sizeof(msgmqtt2), "Generic String updated: id=%d, Text=%s", priority, ReceivedString);
-                                logging(LOG_INFO,msgmqtt2);
-                            }    
+                    case 2: // Generic
+                    {
+                        int idx = findVariableIndexByPriority(id);
+                        if (idx < 0 || idx >= totalVariables) {
+                            // skip payload if unknown priority
+                            counter += length2;
                             break;
                         }
+
+                        if (variables[idx].type == DYNAMIC_BYTE) {
+                            Value = incomingdata[counter++];
+                            variables[idx].value.byteVal = Value;
+                            snprintf(msgmqtt2, sizeof(msgmqtt2),
+                                    "Generic BYTE updated: id=%d, Value=%d",
+                                    id, variables[idx].value.byteVal);
+                            logging(LOG_INFO, msgmqtt2);
+                        }
+
+                        if (variables[idx].type == DYNAMIC_INT) {
+                            byte ValueLow = incomingdata[counter++];
+                            byte ValueHigh = incomingdata[counter++];
+                            variables[idx].value.intVal = ((int)ValueHigh << 8) | ValueLow;
+                            snprintf(msgmqtt2, sizeof(msgmqtt2),
+                                    "Generic INT updated: id=%d, ValueHigh=%d, ValueLow=%d, Combined=%d",
+                                    id, ValueHigh, ValueLow, variables[idx].value.intVal);
+                            logging(LOG_INFO, msgmqtt2);
+                        }
+
+                        if (variables[idx].type == DYNAMIC_IP) {
+                            byte IPAddress[4];
+                            IPAddress[0] = incomingdata[counter++];
+                            IPAddress[1] = incomingdata[counter++];
+                            IPAddress[2] = incomingdata[counter++];
+                            IPAddress[3] = incomingdata[counter++];
+
+                            variables[idx].value.ipVal[0] = IPAddress[0];
+                            variables[idx].value.ipVal[1] = IPAddress[1];
+                            variables[idx].value.ipVal[2] = IPAddress[2];
+                            variables[idx].value.ipVal[3] = IPAddress[3];
+
+                            snprintf(msgmqtt2, sizeof(msgmqtt2),
+                                    "Generic IP updated: id=%d, IP=%d.%d.%d.%d",
+                                    id, IPAddress[0], IPAddress[1], IPAddress[2], IPAddress[3]);
+                            logging(LOG_INFO, msgmqtt2);
+                        }
+
+                        if (variables[idx].type == DYNAMIC_STRING || variables[idx].type == DYNAMIC_PASSWORD) {
+                            char ReceivedString[30];
+                            memset(ReceivedString, 0, sizeof(ReceivedString));
+
+                            byte i2;
+                            for (i2 = 0; i2 < length2 && i2 < sizeof(ReceivedString) - 1; i2++) {
+                                ReceivedString[i2] = (char)incomingdata[counter++];
+                            }
+                            ReceivedString[i2] = '\0';
+
+                            if (variables[idx].type == DYNAMIC_STRING) {
+                                strcpy(variables[idx].value.strVal, ReceivedString);
+                            }
+                            if (variables[idx].type == DYNAMIC_PASSWORD) {
+                                strcpy(variables[idx].value.passVal, ReceivedString);
+                            }
+
+                            snprintf(msgmqtt2, sizeof(msgmqtt2),
+                                    "Generic String updated: id=%d, Text=%s",
+                                    id, ReceivedString);
+                            logging(LOG_INFO, msgmqtt2);
+                        }
+
+                        if (variables[idx].type == DYNAMIC_BOOL) {
+                            Value = incomingdata[counter++];
+                            variables[idx].value.byteVal = (Value != 0) ? 1 : 0;
+                            snprintf(msgmqtt2, sizeof(msgmqtt2),
+                                    "Generic BOOL updated: id=%d, Value=%d",
+                                    id, variables[idx].value.byteVal);
+                            logging(LOG_INFO, msgmqtt2);
+                        }
+                        DynamicVariablesUpdated = true;
+
+                        break;
+                    }
                     //case 3:
                     //break; // should not be changable externally
-                    //case 4: 
+                    //case 4:
                     //break; // should not be changable externally
-                    //case 5: 
+                    //case 5:
                     //break; // should not be changable externally
                     default:{
                         // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/GENERIC");
                         snprintf(msgmqtt2, sizeof(msgmqtt2), "Generic: No Type");
                         logging(LOG_CAUTION,msgmqtt2);
-                        break; 
+                        break;
                         }
                     }
                 break;
@@ -1103,7 +1187,6 @@ void serialloop() {
                     snprintf(msgmqtt2, sizeof(msgmqtt2), "DeleteInput: %d", ValueInt);
                     logging(LOG_INFO,msgmqtt2);
                 }
-            
                 break;
             }
             default:
@@ -1122,48 +1205,4 @@ void serialloop() {
     }
     clearIncomingData();
 
-
 }
-
-// void SendOutputValueSerial(byte id, byte value) {
-//     Serial.print("S01"); // Initiate
-//     Serial.print("S02"); // Marker
-//     serialwrite(0); // Type01: 0 = Output
-//     serialwrite(8); // Type02: 8 = Value
-//     serialwrite(id); // id not required
-//     serialwrite(0); // length not required
-//     // Write 2-byte value
-//     serialwrite((byte)value);   // low byte first
-//     Serial.print("E02");
-//     Serial.print("E01");
-// }
-
-
-
-// void SendSystem(SystemType systemTypeVal, int value) {
-//     Serial.print("S01"); // Initiate
-//     Serial.print("S02"); // Marker
-//     serialwrite(3); // Type01: 3 = System
-//     serialwrite((byte)systemTypeVal); // Type02: VARIABLE
-//     serialwrite(0); // id not required
-//     serialwrite(0); // length not required
-//     // Write 2-byte value
-//     serialwrite((byte)(value & 0xFF));   // low byte first
-//     serialwrite((byte)(value >> 8));     // high byte second
-//     Serial.print("E02");
-//     Serial.print("E01");
-// }
-
-// void SendSystemInBatch(SystemType systemTypeVal, int value) {
-//     // Serial.print("S01"); // Initiate
-//     Serial.print("S02"); // Marker
-//     serialwrite(3); // Type01: 3 = System
-//     serialwrite((byte)systemTypeVal); // Type02: VARIABLE
-//     serialwrite(0); // id not required
-//     serialwrite(0); // length not required
-//     // Write 2-byte value
-//     serialwrite((byte)(value & 0xFF));   // low byte first
-//     serialwrite((byte)(value >> 8));     // high byte second
-//     Serial.print("E02");
-//     // Serial.print("E01");
-// }

@@ -1,3 +1,9 @@
+/*
+ * output.cpp
+ *
+ * Implements output state evaluation, relay updates, dimming, color handling, and other output-side runtime behavior.
+ */
+
 #include <Arduino.h>
 #include "Elementic.h"
 void OutputRelayUpdateFunction(){
@@ -51,7 +57,7 @@ for (int i=1; i <= OutputCounter; i++){
         strcpy_P(suffixBuf, color_set);
         snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
         mqttClient.publish(msgmqtt,"INITIALIZEDRGB");
-        mqttClient.subscribe(msgmqtt);        
+        mqttClient.subscribe(msgmqtt);
         break;
         case 4: //LAMP DMX
         strcpy_P(suffixBuf, onoffset);
@@ -95,13 +101,13 @@ for (int i=1; i <= OutputCounter; i++){
 
 // void outputsetup(){
 //     outputsetupvariables(); // Laadt alle output variabelen
-    
+
 //     for (uint8_t i = 0; i < TotalRelays; i++) //TotalRelays
 //     {
 //         pinMode(Relay[i], OUTPUT);
 //     }
-    
-// } 
+
+// }
 
 void output(){
     OutputRelayUpdate = false;
@@ -130,7 +136,7 @@ void output(){
                         OutputValueMemory[i]++;
                         analogWrite(OutputPin[i], OutputValueMemory[i]);
                         }
-                        
+
                     if(OutputValueActual[i]<OutputValueMemory[i])
                         {
                         OutputValueMemory[i]--;
@@ -184,7 +190,7 @@ void output(){
                     //mqttClient.publish(msgmqtt,msgmqtt2);
                     DMXwrite(OutputChannel[i],OutputValueMemory[i]);
                     DMXstartupTimer = 40;
-                    //DMXSend();
+                    // DMXSend();
                 break;
                 case 5: //Lamp aan/uit (Ext.)
                     if(OutputValueActual[i]!=OutputValueMemory[i]){
@@ -205,7 +211,7 @@ void output(){
                 //         //Serial.println("Output case 6");
                 // break;
                 case 6: //Lamp PWM (Ext.) No Burst Protection
-                       
+
                     if(OutputValueActual[i]!=OutputValueMemory[i])
                     {
                         strcpy_P(suffixBuf, dimvalue_set);
@@ -223,9 +229,12 @@ void output(){
                     if(OutputValueActual[i]!=OutputValueMemory[i]){
                         //digitalWrite(OutputRelay[Relay[i]], HIGH); // 11-02-2020 Moet dit niet andersom zijn? of weg?
                         OutputValueMemory[i]=OutputValueActual[i];
+                        // uint16_t signalTimeMs = (((uint16_t)OutputMaxValue[i] << 8) | (uint16_t)OutputMinValue[i]);
+                        // OutputSignalCountdown[i] = signalTimeMs / 10;
                         OutputSignalCountdown[i] = (((uint16_t)OutputMaxValue[i] << 8) | (uint16_t)OutputMinValue[i]);
+
                         SendOutputValueMQTT(i);
-                        snprintf(msgmqtt2, sizeof(msgmqtt2), "Set timer to: %d ms.", OutputSignalCountdown[i]);
+                        snprintf(msgmqtt2, sizeof(msgmqtt2), "Set timer to: %lu ms.", (unsigned long)OutputSignalCountdown[i] * 10UL);
                         logging(LOG_INFO,msgmqtt2);
                         }
                     if (OutputSignalCountdown[i]>0){
@@ -261,43 +270,26 @@ void output(){
                         logging(LOG_INFO, "End timer");
 }
 
-                    
-
                 break;
 
                 }
-               
-            
+            OutputRelayUpdateFunction();    
             }
-        OutputRelayUpdateFunction(); 
+        
         }
     if(DMXstartupTimer>0){
             DMXflush();
             DMXstartupTimer--;
             }
-
-    // move to project        
-    // if(DoorBellEnabled==true){
-    //     if(DoorBellCounter>0){
-    //         if(DoorBellCounter%20>10){
-    //             digitalWrite(DoorBellLightOutput, LOW);    // LED
-    //             }
-    //         else{
-    //             digitalWrite(DoorBellLightOutput, HIGH);    // LED 
-    //             }
-    //         if(DoorBellCounter>325){ // Variabel toevoegen
-    //             digitalWrite(DoorBellRingOutput, HIGH);   // Deurbel
-    //             }
-    //         else{
-    //             digitalWrite(DoorBellRingOutput, LOW);   // Deurbel 
-    //             }
-    //         DoorBellCounter = DoorBellCounter -1;
-    //         }
-    //     else{
-    //         digitalWrite(DoorBellLightOutput, HIGH);  // LED
-    //         digitalWrite(DoorBellRingOutput, LOW);   // Deurbel
-    //         }
-    //     }
     }
-
-// Implementation for output
+    
+void setrelays(){
+    for (uint8_t i = 1; i <= OutputCounter; i++)
+    {
+        pinMode(OutputRelay[i], OUTPUT);
+    }
+    for (uint8_t i = 1; i <= SwitchCounter; i++)
+    {
+        pinMode(SwitchPin[i], INPUT);
+    }
+}

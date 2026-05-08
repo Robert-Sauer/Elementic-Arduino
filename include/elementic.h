@@ -1,6 +1,13 @@
+/*
+ * Elementic.h
+ *
+ * Central public header for the Elementic library. Declares shared constants, data structures, global state, and public function prototypes.
+ */
+
 #pragma once
 #include <Arduino.h>
 extern const uint16_t ELEMENTIC_DEVICEID;   // user defines in sketch
+
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -8,20 +15,28 @@ extern const uint16_t ELEMENTIC_DEVICEID;   // user defines in sketch
 #include <PubSubClient.h>
 #include <string.h>
 
-
 extern Client&      netClient;   // implemented once per sketch
 extern PubSubClient mqttClient;  // same for every board
 
+/* Constants */ 
+// multiple setups for different semiconductors!!!
 
-/* Constants */
-
-#ifndef OutputChannels
-#define OutputChannels 5   // default
+#if defined(ARDUINO_ARCH_AVR)
+  #define OutputChannels    23   
+  #define InputChannels     19    
+  #define MAX_STRING_LENGTH 32
+  #define MAXNAMELENGTH     10
+  #define MAXTOPICLENGTH    14
+#else
+  #define OutputChannels    23   
+  #define InputChannels     19    
+  #define MAX_STRING_LENGTH 32
+  #define MAXNAMELENGTH     14
+  #define MAXTOPICLENGTH    20
 #endif
 
-#ifndef InputChannels
-#define InputChannels 10    // default
-#endif
+
+
 
 #define DMX_MAX           10
 #define TOTAL_STRINGS     6
@@ -29,17 +44,17 @@ extern PubSubClient mqttClient;  // same for every board
 #define TOTAL_INTS        2
 #define TOTAL_IPS         3
 #define TOTAL_PASSWORDS   2
-#define MAX_STRING_LENGTH 64
+#define TOTAL_BOOLS       2
+#define TOTAL_DYNAMICVARIABLES       TOTAL_STRINGS+TOTAL_BYTES+TOTAL_INTS+TOTAL_IPS+TOTAL_PASSWORDS+TOTAL_BOOLS
 
-#define MAXNAMELENGTH     15
-#define MAXTOPICLENGTH    28
+
 #define INOUT_MATRIX_COLS  5
 
 /* Enums */
 enum SystemType {
     IDLE = 0, BOOTING, ETHERNET, MQTT, ERROR,
     UPTIME, COMMAND, EEPROMBYTES, RAMBYTES, DEVICETYPE,
-    NUMOUTPUTS, MAXOUTPUTS, NUMINPUTS, MAXINPUTS, DELETEOUTPUT, DELETEINPUT, MAXCHARNAME, MAXCHARTOPIC
+    NUMOUTPUTS, MAXOUTPUTS, NUMINPUTS, MAXINPUTS, DELETEOUTPUT, DELETEINPUT, MAXCHARNAME, MAXCHARTOPIC, PROJECTID
 };
 
 enum CommandType {
@@ -47,7 +62,24 @@ enum CommandType {
 };
 
 enum VariableType {
-    DYNAMIC_STRING = 0, DYNAMIC_BYTE, DYNAMIC_INT, DYNAMIC_IP, DYNAMIC_PASSWORD
+    DYNAMIC_STRING = 0, DYNAMIC_BYTE, DYNAMIC_INT, DYNAMIC_IP, DYNAMIC_PASSWORD, DYNAMIC_BOOL
+};
+
+enum VariableModify {
+    Output = 0, Input, Generic
+};
+
+enum VariableStatusFlag : byte {
+    STATUS_GRAYED   = 1 << 0,   // BIT0
+    STATUS_READONLY = 1 << 1,   // BIT1
+    STATUS_HIDDEN   = 1 << 2,   // BIT2
+    STATUS_NODELETE = 1 << 3    // BIT3
+};
+
+enum VariableContainerType : byte {
+    VARIABLE_OUTPUT  = 0,
+    VARIABLE_INPUT   = 1,
+    VARIABLE_DYNAMIC = 2
 };
 
 /* Variable structures */
@@ -57,6 +89,7 @@ union VariableValue {
     int intVal;
     uint8_t ipVal[4];
     char passVal[MAX_STRING_LENGTH];
+    bool boolVal;
 };
 
 struct DynamicVariable {
@@ -78,7 +111,8 @@ extern const char defaultvalue_set[]    PROGMEM;
 
 /* Global PROGMEM Int */
 
-extern const int device_type    PROGMEM;
+extern const int device_type PROGMEM;
+extern const long projectid;
 
 /* Global variables */
 extern uint8_t OutputPin[OutputChannels+1];
@@ -100,6 +134,7 @@ extern uint8_t OutputBlueValue[OutputChannels+1];
 extern uint8_t OutputRedMemory[OutputChannels+1];
 extern uint8_t OutputGreenMemory[OutputChannels+1];
 extern uint8_t OutputBlueMemory[OutputChannels+1];
+extern uint8_t OutputStatus[OutputChannels+1];
 extern bool MQTTUpdate[OutputChannels+1];
 extern int OutputSignalCountdown[OutputChannels+1];
 extern int blinkingTimer;
@@ -113,6 +148,7 @@ extern bool SwitchDimDirection[InputChannels+1];
 extern int SwitchTimer[InputChannels+1];
 extern uint8_t InOutMatrixCouter[InputChannels+1];
 extern uint8_t InOutMatrix[InputChannels+1][INOUT_MATRIX_COLS];
+extern uint8_t InputStatus[InputChannels+1];
 extern char MQTT_Output[OutputChannels+1][MAXTOPICLENGTH];
 extern char MQTT_Input[InputChannels+1][MAXTOPICLENGTH];
 // extern char MQTT_Name[OutputChannels][10]; //27-11-2025 overbodig??
@@ -144,27 +180,30 @@ extern bool WIFIConnected;
 extern bool EthernetConnected;
 extern bool networkConnected;
 
-
-
 extern const char MQTTName[];
 extern const char MQTTServer[];
 extern const char MQTTUsername[];
 extern const char MQTTPassword[] ;
 
-extern const uint8_t     factorymac[];
-extern const uint8_t      factoryip[];
-extern const uint8_t factorygateway[]; 
-extern const uint8_t  factorysubnet[]; 
-extern const char   factoryhostname[]; 
+extern const uint8_t factorymac[];
+extern const uint8_t factoryip[];
+extern const uint8_t factorygateway[];
+extern const uint8_t factorysubnet[];
+extern const char factoryhostname[];
+extern const char factorySSID[];
+extern const char factoryWIFIPassword[];
 
 /* Dynamic variable system */
 extern const int totalVariables;
 extern DynamicVariable variables[];
+extern uint8_t DynamicVariableStatus[TOTAL_DYNAMICVARIABLES];
 extern byte PriorityCounter;
+extern bool DynamicVariablesUpdated;
 
 /* Function declarations */
 extern void input();
 extern void output();
+extern void setrelays();
 extern void serialloop();
 extern void ElementicLoop();
 extern void serialsetup();
@@ -172,9 +211,14 @@ extern void SendOutputValueSerial(byte id, byte value);
 extern void SendOutputValueMQTT(byte id);
 extern void SendSystem(SystemType systemTypeVal, int value);
 extern void SendSystemInBatch(SystemType systemTypeVal, int value);
+extern void SendStatus(byte type1, byte protocolId, byte statusValue);
 extern void DefineString(const String& varName, const char val[20], int priority);
 extern void DefinePassword(const String& varName, const char* val, int priority);
 extern void DefineIP(const String& varName, byte ip1, byte ip2, byte ip3, byte ip4, int priority);
+extern void DefineBool(const String& varName, bool val, int priority);
+extern int findVariableIndexByName(const String& varName);
+extern void ModifyVariableStatus(byte type1, byte ID, const String& genericName, byte statusFlag, bool value);
+extern bool IsVariableStatusSet(byte type1, byte ID, const String& genericName, byte statusFlag);
 
 extern void ReadAllDataFromEEPROM();
 extern void SendAllData(bool ER, bool SD, bool MEM);
@@ -185,7 +229,8 @@ extern void reconnect();
 extern void reconnect();
 extern void MQTTSubscribe();
 extern void MQTTLoop();
-extern void MQTTSetup();
+extern void MQTTSetupClient();
+extern void MQTTSetupVariables();
 extern void callback(char* topic, byte* payload, unsigned int length) ;
 extern void ElementicSetup();
 extern void outputsetupvariables();
@@ -198,9 +243,8 @@ extern void serialwrite(byte i);
 extern void networkCheckLoop();
 extern void connectNetwork();
 extern void setupNetwork();
-
-
-
+extern void DMXstart();
+// extern void DMXSend();
 
 static inline bool startsWith(const char* s, const char* prefix) {
   if (!s || !prefix) return false;
@@ -237,9 +281,6 @@ static inline bool startsWith(const char* s, const char* prefix) {
 
 #endif
 
-
-
-
 /* Helpers */
 extern int findVariableIndexByPriority(int targetPriority);
 extern String GetStringValue(const String& varName);
@@ -247,6 +288,7 @@ extern byte GetByteValue(const String& varName);
 extern int GetIntValue(const String& varName);
 extern byte* GetIPValue(const String& varName);
 extern String GetPasswordValue(const String& varName);
+extern bool GetBoolValue(const String& varName);
 extern int GetPriority(const String& varName);
 
 enum LogLevel : uint8_t { LOG_INFO=0, LOG_CAUTION=1, LOG_WARNING=2 };

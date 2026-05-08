@@ -1,7 +1,8 @@
-/*****************************************************************
- *  Elementic.cpp  –  enige bronbestand dat alle globale
- *  variabelen definitief **definieert** én de stub-functies bevat
- *****************************************************************/
+/*
+ * Elementic.cpp
+ *
+ * Defines the shared global storage for the library and contains the core setup and runtime coordination helpers.
+ */
 
 #include <Arduino.h>
 #include <EEPROM.h>
@@ -14,9 +15,10 @@ PubSubClient mqttClient(netClient);   // ONE definition
 unsigned long previousMillis = 0;
 const unsigned long interval = 2000; // 2 seconds in milliseconds
 
-const unsigned long InputInterval  = 8; //milliseconds
+const unsigned long InputInterval  = 4; //milliseconds
 const unsigned long OutputInterval = 10; //milliseconds
 const unsigned long CheckNetworkInterval = 5000; //milliseconds
+const unsigned long DMXInterval = 10; //milliseconds;
 
 //const int device_type = 0;
 
@@ -24,6 +26,8 @@ const unsigned long CheckNetworkInterval = 5000; //milliseconds
 unsigned long LastInputInterval  = 0;
 unsigned long LastOutputInterval = 0;
 unsigned long LastCheckNetworkInterval = 0;
+unsigned long LastDMXInterval = 0;
+
 
 /* ──────────────────────────────
  *  PROGMEM-constanten
@@ -65,6 +69,7 @@ int      OutputSignalCountdown[OutputChannels+1]  = {0};
 int      blinkingTimer                          = 50; //value per 10 ms
 
 bool     MQTTUpdate[OutputChannels+1]         = {false};
+uint8_t  OutputStatus[OutputChannels+1] = {0};
 bool     OutputRelayUpdate                  = false;
 
 uint8_t  OutputCounter                      = 0;
@@ -78,6 +83,7 @@ int      SwitchTimer[InputChannels+1]           = {0};
 
 uint8_t  InOutMatrixCouter[InputChannels+1]     = {0};
 uint8_t  InOutMatrix[InputChannels+1][INOUT_MATRIX_COLS]        = {{0}};
+uint8_t  InputStatus[InputChannels+1]          = {0};
 
 char     MQTT_Output[OutputChannels+1][MAXTOPICLENGTH]      = {{0}};
 char     MQTT_Input[InputChannels+1][MAXTOPICLENGTH]        = {{0}};
@@ -99,7 +105,6 @@ int      SerialCommand             = 0;
 int      DeleteInput               = 0;
 int      DeleteOutput              = 0;
 int      EEPROMStorage             = 0;
-
 int      DMXstartupTimer           = 0;
 int      MQTTBurstProtection       = 0;
 char msgmqtt[80];
@@ -107,12 +112,11 @@ char msgmqtt2[80];
 byte PriorityCounter = 1;
 long lastReconnectAttempt;
 
-
 /* ──────────────────────────────
  *  Dynamic-variable tabel
  * ────────────────────────────── */
  const int totalVariables = TOTAL_STRINGS + TOTAL_BYTES + TOTAL_INTS
-                          + TOTAL_IPS     + TOTAL_PASSWORDS;
+                          + TOTAL_IPS     + TOTAL_PASSWORDS + TOTAL_BOOLS;
 
 /* Helpers */
 int findVariableIndexByPriority(int targetPriority);
@@ -122,10 +126,11 @@ int GetIntValue(const String& varName);
 byte* GetIPValue(const String& varName);
 String GetPasswordValue(const String& varName);
 int GetPriority(const String& varName);
+bool GetBoolValue(const String& varName);
 
-
-
+uint8_t DynamicVariableStatus[TOTAL_DYNAMICVARIABLES];
 DynamicVariable variables[totalVariables] = {};   // leeg init; zelf vullen in setup()
+bool DynamicVariablesUpdated = false;
 
 void ElementicSetup(){
   Serial.begin(115200);
@@ -138,74 +143,57 @@ void ElementicSetup(){
     Serial.read();
   }
 
-  
   #if defined(ESP32) || defined(ESP8266)
     EEPROM.begin(2048);     // Only needed on ESP platforms
   #endif
 
-  
   serialsetup();
   setupNetwork();
   logging(LOG_INFO,"Booting. . .");
-
 
   #if defined(ESP8266)
     snprintf(msgmqtt2, sizeof(msgmqtt2), "Moving output: %s", ESP.getResetReason().c_str());
     logging(LOG_INFO,msgmqtt2);
   #endif
-  
+
   SendSystem(BOOTING, 1);
   SendSystem(IDLE, 0);
   SendSystem(MQTT, 0);
-  
+
+  DMXstart();
+
   genericsetupvariables();
+  MQTTSetupVariables();
   outputsetupvariables();
   inputsetupvariables();
   ReadAllDataFromEEPROM();
-  for (uint8_t i = 1; i <= OutputCounter; i++) //TotalRelays!!!!!!!!!!!!!!!! 14-12-2025 This one needs to be repeated after updated settings via app!!!
-  {
-    pinMode(OutputRelay[i], OUTPUT);
-  }
-  for (uint8_t i = 1; i <= SwitchCounter; i++) 
-  {
-    pinMode(SwitchPin[i], INPUT);
-  }
+  setrelays();
   SendSystem(DEVICETYPE, ELEMENTIC_DEVICEID);
   connectNetwork();
   // logging(LOG_INFO,"After connect network. . .");
-  MQTTSetup();
+  MQTTSetupClient();
   // logging(LOG_INFO,"After MQTT Setup. . .");
-  
+
   SendSystem(BOOTING, 0);
   SendSystem(IDLE, 1);
   SendSystem(EEPROMBYTES, EEPROMStorage);
   SendSystem(RAMBYTES, freeRam());
+  SendSystem(PROJECTID, (int)projectid);
 }
-
 
  // ---- Helpers (put at top of the .cpp with your callback) ----
 
-
-
-
 // ---- Your callback (drop-in replacement) ----
-
-
-
 
 void ElementicLoop(){
   serialloop();
   networkCheckLoop();
-  
-  if (networkConnected) { 
+
+  if (networkConnected) {
     MQTTLoop();
   }
-  
+
   unsigned long currentMillis = millis();
-
-  
-
-
 
   switch (SerialCommand) { // RAM/EEPROM Status, consider generic loop for Elementic
   case 1:
@@ -286,7 +274,6 @@ void ElementicLoop(){
   if (DeleteInput>0){
         if (DeleteInput < 1 || DeleteInput > SwitchCounter) return;
 
-
     for (int i = DeleteInput; i < SwitchCounter ; i++)
     {
       //  snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/LOG2");
@@ -317,8 +304,6 @@ void ElementicLoop(){
     DeleteInput = 0;
   }
 
-
-  
   if ((unsigned long)(currentMillis - LastInputInterval) >= InputInterval) {
     LastInputInterval += InputInterval;   // keep in sync even if code runs late
     input();
@@ -329,14 +314,17 @@ void ElementicLoop(){
     output();
   }
 
+  if ((unsigned long)(currentMillis - LastDMXInterval) >= DMXInterval) {
+    LastDMXInterval += DMXInterval;   // keep in sync even if code runs late
+    DMXflush();
+  }
+
   if ((unsigned long)(currentMillis - LastCheckNetworkInterval) >= CheckNetworkInterval) {
     LastCheckNetworkInterval += CheckNetworkInterval;   // keep in sync even if code runs late
     SendSystem(IDLE, 1);
     SendSystem(EEPROMBYTES, EEPROMStorage);
     SendSystem(RAMBYTES, freeRam());
   }
-
- 
-
   SerialCommand = 0;
+  DynamicVariablesUpdated = false;
   }
