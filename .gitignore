@@ -1,5 +1,8 @@
 .pio/
 .vscode/
+Elementic/
+.vscode/.browse.c_cpp.db*
+.vscode/ipch/
 *.tar.gz
 *.zip
 *.log

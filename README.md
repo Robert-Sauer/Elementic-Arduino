@@ -24,7 +24,7 @@ lib_deps =
 For local development, use `lib_extra_dirs` from your project:
 
 ```ini
-lib_extra_dirs = ../0001 - Elementic Library/Elementic
+lib_extra_dirs = ../0001 - Elementic Library
 ```
 
 ## Basic Usage
