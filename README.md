@@ -18,7 +18,7 @@ When published to the PlatformIO Registry, add Elementic to `lib_deps`:
 
 ```ini
 lib_deps =
-    rsauer/Elementic
+    Elementic
 ```
 
 For local development, use `lib_extra_dirs` from your project:
