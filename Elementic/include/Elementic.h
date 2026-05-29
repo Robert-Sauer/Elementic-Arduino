@@ -19,17 +19,25 @@ extern Client&      netClient;   // implemented once per sketch
 extern PubSubClient mqttClient;  // same for every board
 
 /* Constants */ 
-// multiple setups for different semiconductors!!!
+// multiple setups for different microcontrollers!
 
 #if defined(ARDUINO_ARCH_AVR)
+  #ifndef OutputChannels
   #define OutputChannels    23   
+  #endif
+  #ifndef InputChannels
   #define InputChannels     19    
+  #endif
   #define MAX_STRING_LENGTH 32
   #define MAXNAMELENGTH     10
   #define MAXTOPICLENGTH    14
 #else
+  #ifndef OutputChannels
   #define OutputChannels    23   
+  #endif
+  #ifndef InputChannels
   #define InputChannels     19    
+  #endif
   #define MAX_STRING_LENGTH 32
   #define MAXNAMELENGTH     14
   #define MAXTOPICLENGTH    20
@@ -203,6 +211,7 @@ extern bool DynamicVariablesUpdated;
 /* Function declarations */
 extern void input();
 extern void output();
+extern void output10ms();
 extern void setrelays();
 extern void serialloop();
 extern void ElementicLoop();
@@ -213,19 +222,26 @@ extern void SendSystem(SystemType systemTypeVal, int value);
 extern void SendSystemInBatch(SystemType systemTypeVal, int value);
 extern void SendStatus(byte type1, byte protocolId, byte statusValue);
 extern void DefineString(const String& varName, const char val[20], int priority);
+extern void DefineByte(const String& varName, byte val, int priority);
+extern void DefineInt(const String& varName, int val, int priority);
 extern void DefinePassword(const String& varName, const char* val, int priority);
 extern void DefineIP(const String& varName, byte ip1, byte ip2, byte ip3, byte ip4, int priority);
 extern void DefineBool(const String& varName, bool val, int priority);
 extern int findVariableIndexByName(const String& varName);
 extern void ModifyVariableStatus(byte type1, byte ID, const String& genericName, byte statusFlag, bool value);
 extern bool IsVariableStatusSet(byte type1, byte ID, const String& genericName, byte statusFlag);
+extern bool SetStringValue(const String& varName, const char* newVal);
+extern bool SetByteValue(const String& varName, byte newVal);
+extern bool SetIntValue(const String& varName, int newVal);
+extern bool SetIPValue(const String& varName, byte ip1, byte ip2, byte ip3, byte ip4);
+extern bool SetPasswordValue(const String& varName, const char* newVal);
+extern bool SetBoolValue(const String& varName, bool newVal);
 
 extern void ReadAllDataFromEEPROM();
 extern void SendAllData(bool ER, bool SD, bool MEM);
 extern void DMXwrite(int channel, uint8_t value);
 extern void DMXflush();
 extern void outputsetup();
-extern void reconnect();
 extern void reconnect();
 extern void MQTTSubscribe();
 extern void MQTTLoop();
@@ -241,7 +257,6 @@ extern int freeRam();
 // extern void logging(LogLevel level, char text[50]);
 extern void serialwrite(byte i);
 extern void networkCheckLoop();
-extern void connectNetwork();
 extern void setupNetwork();
 extern void DMXstart();
 // extern void DMXSend();
@@ -294,5 +309,3 @@ extern int GetPriority(const String& varName);
 enum LogLevel : uint8_t { LOG_INFO=0, LOG_CAUTION=1, LOG_WARNING=2 };
 //extern void logging(LogLevel level, char text[50]); 2026-02-14
 extern void logging(LogLevel level, const char* text);
-extern bool logtoMQTT;
-extern bool logtoSerial;

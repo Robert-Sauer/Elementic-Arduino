@@ -51,6 +51,11 @@ static inline uint16_t elementic_getDeviceId() {
   return ELEMENTIC_DEVICEID;
 }
 
+static void elementic_mac_to_string(const uint8_t mac[6], char out[13]) {
+  snprintf(out, 13, "%02X%02X%02X%02X%02X%02X",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
 #if ELEMENTIC_HAS_WIFI
 static inline bool elementic_wifi_is_connected() {
   return (WiFi.status() == WL_CONNECTED);
@@ -182,7 +187,10 @@ static void connectToWiFi() {
   delay(50);
   WiFi.mode(WIFI_STA);
   WiFi.persistent(false);
-  WiFi.setAutoReconnect(true);
+
+  #if defined(ESP8266) || defined(ESP32)
+    WiFi.setAutoReconnect(true);
+  #endif
 
   #if defined(ESP8266)
     WiFi.setSleepMode(WIFI_NONE_SLEEP);
@@ -260,7 +268,9 @@ static void connectToEthernet(uint16_t deviceId) {
 
 void setupNetwork() {
   #if ELEMENTIC_HAS_NETWORK
-    DefineString("Mac Address", "809B209BFFB4", PriorityCounter++);
+    char macAddress[13];
+    elementic_mac_to_string(factorymac, macAddress);
+    DefineString("Mac Address", macAddress, PriorityCounter++);
     DefineBool("DHCP", false, PriorityCounter++);
     DefineIP("IP Address", factoryip[0], factoryip[1], factoryip[2], factoryip[3], PriorityCounter++);
     DefineIP("Gateway",   factorygateway[0], factorygateway[1], factorygateway[2], factorygateway[3], PriorityCounter++);
@@ -311,17 +321,19 @@ void connectNetwork() {
 
 void networkCheckLoop() {
   static uint32_t lastNetCheckMs = 0;
-  static bool dhcpInitialized = false;
-  static bool lastDhcpEnabled = false;
+
+  #if ELEMENTIC_HAS_ETHERNET
+    static bool dhcpInitialized = false;
+    static bool lastDhcpEnabled = false;
+  #endif
 
   #if ELEMENTIC_HAS_NETWORK
     if (DynamicVariablesUpdated) {
       DynamicVariablesUpdated = false;
-
-      const bool dhcpEnabled = GetBoolValue("DHCP");
       elementic_update_network_variable_status();
 
       #if ELEMENTIC_HAS_ETHERNET
+        const bool dhcpEnabled = GetBoolValue("DHCP");
         if (!dhcpInitialized) {
           dhcpInitialized = true;
           lastDhcpEnabled = dhcpEnabled;
@@ -344,9 +356,9 @@ void networkCheckLoop() {
   const uint16_t deviceId = elementic_getDeviceId();
   if (deviceId == 0) return;
 
-  const bool dhcpEnabled = GetBoolValue("DHCP");
-
   #if ELEMENTIC_HAS_ETHERNET
+    const bool dhcpEnabled = GetBoolValue("DHCP");
+
     if (!dhcpInitialized) {
       dhcpInitialized = true;
       lastDhcpEnabled = dhcpEnabled;

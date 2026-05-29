@@ -22,9 +22,38 @@ const unsigned long DMXInterval = 10; //milliseconds;
 
 //const int device_type = 0;
 
+namespace {
+void ClearEEPROMForFactorySettings() {
+  const int eepromLength = EEPROM.length();
+  for (int i = 0; i < eepromLength; i++) {
+    EEPROM.write(i, 0xFF);
+  }
+
+  #if defined(ESP8266) || defined(ESP32)
+    EEPROM.commit();
+  #endif
+
+  EEPROMStorage = 0;
+}
+
+void RestartDevice() {
+  delay(100);
+
+  #if defined(ESP8266) || defined(ESP32)
+    ESP.restart();
+  #elif defined(ARDUINO_ARCH_AVR)
+    void (*resetFunc)(void) = 0;
+    resetFunc();
+  #elif defined(NVIC_SystemReset)
+    NVIC_SystemReset();
+  #endif
+}
+}
+
 // Internal timers
 unsigned long LastInputInterval  = 0;
 unsigned long LastOutputInterval = 0;
+unsigned long LastOutput10msInterval = 0;
 unsigned long LastCheckNetworkInterval = 0;
 unsigned long LastDMXInterval = 0;
 
@@ -179,6 +208,7 @@ void ElementicSetup(){
   SendSystem(EEPROMBYTES, EEPROMStorage);
   SendSystem(RAMBYTES, freeRam());
   SendSystem(PROJECTID, (int)projectid);
+  
 }
 
  // ---- Helpers (put at top of the .cpp with your callback) ----
@@ -196,20 +226,26 @@ void ElementicLoop(){
   unsigned long currentMillis = millis();
 
   switch (SerialCommand) { // RAM/EEPROM Status, consider generic loop for Elementic
-  case 1:
+  case RAMTOEEPROM:
     // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", GetStringValue("MQTTName").c_str(), "/LOG");
     // mqttClient.publish(msgmqtt, "Store Data to EEPROM");
     logging(LOG_INFO,"Store Data to EEPROM");
     SendAllData(true, false, true);
     break;
-  case 2:
+  case EEPROMTORAM:
     // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", GetStringValue("MQTTName").c_str(), "/LOG");
     // mqttClient.publish(msgmqtt, "Restore Data from EEPROM");
     logging(LOG_INFO,"Restore Data from EEPROM");
     ReadAllDataFromEEPROM();
     break;
-  case 3:
-  case 4:
+  case FACTORYSETTINGS:
+    logging(LOG_INFO,"Factory settings: clear EEPROM and restart");
+    ClearEEPROMForFactorySettings();
+    SendSystem(EEPROMBYTES, EEPROMStorage);
+    SerialCommand = 0;
+    RestartDevice();
+    break;
+  case CLEARERROR:
     break;
   }
 
@@ -313,7 +349,10 @@ void ElementicLoop(){
     LastOutputInterval += OutputInterval;   // keep in sync even if code runs late
     output();
   }
-
+  if ((unsigned long)(currentMillis - LastOutput10msInterval) >= 10) {
+    LastOutput10msInterval += 10;   // keep in sync even if code runs late
+    output10ms();
+  }
   if ((unsigned long)(currentMillis - LastDMXInterval) >= DMXInterval) {
     LastDMXInterval += DMXInterval;   // keep in sync even if code runs late
     DMXflush();
@@ -324,6 +363,7 @@ void ElementicLoop(){
     SendSystem(IDLE, 1);
     SendSystem(EEPROMBYTES, EEPROMStorage);
     SendSystem(RAMBYTES, freeRam());
+    SendSystem(UPTIME, millis()/1000);
   }
   SerialCommand = 0;
   DynamicVariablesUpdated = false;

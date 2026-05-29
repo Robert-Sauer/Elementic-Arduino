@@ -14,23 +14,6 @@
 // =============================================================================
 
 // ------------------------------------------------------------
-// 0) Optional: keep these lists from Excel for runtime logic
-//    (No longer used for compile-time capability flags)
-// ------------------------------------------------------------
-#define DEVICE_HAS_WIFI(ID) ( \
-    ((ID) == 4)  || ((ID) == 6)  || ((ID) == 7)  || ((ID) == 8)  || \
-    ((ID) == 9)  || ((ID) == 10) || ((ID) == 12) || ((ID) == 19) || \
-    ((ID) == 20) || ((ID) == 21) || ((ID) == 24) || ((ID) == 25) || \
-    ((ID) == 26) || ((ID) == 27) || ((ID) == 28) || ((ID) == 29) || \
-    ((ID) == 30) || ((ID) == 31) \
-)
-
-#define DEVICE_HAS_ETHERNET(ID) ( \
-    ((ID) == 2)  || ((ID) == 3)  || ((ID) == 4)  || ((ID) == 5)  || \
-    ((ID) == 11) || ((ID) == 15) || ((ID) == 17) \
-)
-
-// ------------------------------------------------------------
 // 1) Driver enums
 // ------------------------------------------------------------
 #define ELEMENTIC_WIFI_DRIVER_NONE     0
@@ -46,7 +29,7 @@
 #define ELEMENTIC_ETH_DRIVER_TEENSY    4   // NativeEthernet (Teensy 4.1)
 
 // ------------------------------------------------------------
-// 2) PLATFORM detection → compile-time feature flags
+// 2) PLATFORM detection > compile-time feature flags
 // ------------------------------------------------------------
 
 // ---- WiFi capability (compile it only where it exists) ----
@@ -58,10 +41,9 @@
   #define ELEMENTIC_HAS_WIFI 1
   #define ELEMENTIC_WIFI_DRIVER ELEMENTIC_WIFI_DRIVER_ESP32
 
-// RP2040 Pico W / Pico 2W: depends on core. Both common cores define ARDUINO_ARCH_RP2040.
-// Pico W boards often define ARDUINO_RASPBERRY_PI_PICO_W or similar.
-// This branch is permissive: it compiles WiFi if RP2040 is used and WiFi.h exists in your core.
-#elif defined(ARDUINO_ARCH_RP2040)
+// RP2040 Pico W / Pico 2W. Do not treat all RP2040 boards as WiFi boards:
+// Wiznet RP2040 boards use Ethernet instead.
+#elif defined(ARDUINO_ARCH_RP2040) && !defined(ARDUINO_WIZNET_5100S_EVB_PICO)
   #define ELEMENTIC_HAS_WIFI 1
   #define ELEMENTIC_WIFI_DRIVER ELEMENTIC_WIFI_DRIVER_PICOW
 
@@ -86,6 +68,8 @@
   // If it isn't a WiFi platform, you likely want Ethernet on classic Arduino setups.
   // If you have a non-network device, you can disable this by defining ELEMENTIC_FORCE_NO_ETHERNET.
   #ifndef ELEMENTIC_FORCE_NO_ETHERNET
+    #undef  ELEMENTIC_HAS_ETHERNET
+    #undef  ELEMENTIC_ETH_DRIVER
     #define ELEMENTIC_HAS_ETHERNET 1
     #define ELEMENTIC_ETH_DRIVER   ELEMENTIC_ETH_DRIVER_WIZNET
   #endif
@@ -97,6 +81,14 @@
   #undef  ELEMENTIC_ETH_DRIVER
   #define ELEMENTIC_HAS_ETHERNET 1
   #define ELEMENTIC_ETH_DRIVER   ELEMENTIC_ETH_DRIVER_TEENSY
+#endif
+
+// Wiznet W5100S-EVB-Pico
+#if defined(ARDUINO_WIZNET_5100S_EVB_PICO)
+  #undef  ELEMENTIC_HAS_ETHERNET
+  #undef  ELEMENTIC_ETH_DRIVER
+  #define ELEMENTIC_HAS_ETHERNET 1
+  #define ELEMENTIC_ETH_DRIVER   ELEMENTIC_ETH_DRIVER_WIZNET
 #endif
 
 // Portenta / Portenta Machine Control (library/core dependent)

@@ -224,6 +224,26 @@ void output(){
                     }
                 break;
 
+                default: 
+                break;
+                }
+            OutputRelayUpdateFunction();    
+            }
+        
+        }
+    if(DMXstartupTimer>0){
+            DMXflush();
+            DMXstartupTimer--;
+            }
+    }
+
+ void output10ms(){
+    OutputRelayUpdate = false;
+    char suffixBuf[32]; // 25-08-2025
+    for (int i=1; i <= OutputCounter; i++){
+        if(OutputValueMemory[i]!=OutputValueActual[i]||OutputSignalCountdown[i]>0){//||OutputRedValue[i]!=OutputRedMemory[i]||OutputGreenValue[i]!=OutputGreenMemory[i]||OutputBlueValue[i]!=OutputBlueMemory[i]
+            OutputRelayUpdate = true;
+            switch (OutputType[i]){
                 case 7: //Signal
                     // OutputRelayUpdateFunction();
                     if(OutputValueActual[i]!=OutputValueMemory[i]){
@@ -268,28 +288,32 @@ void output(){
                         SendOutputValueMQTT(i);
                         SendOutputValueSerial(i, 0);
                         logging(LOG_INFO, "End timer");
-}
+                    }
 
                 break;
-
+                default:
+                break;
                 }
-            OutputRelayUpdateFunction();    
             }
-        
         }
-    if(DMXstartupTimer>0){
-            DMXflush();
-            DMXstartupTimer--;
-            }
-    }
+    }   
+
     
 void setrelays(){
     for (uint8_t i = 1; i <= OutputCounter; i++)
     {
+        if (OutputRelay[i] == 0) continue;
+        #if defined(ESP32) || defined(ESP8266)
+        OutputRelay[i];
+        #endif
         pinMode(OutputRelay[i], OUTPUT);
     }
     for (uint8_t i = 1; i <= SwitchCounter; i++)
     {
+        if (SwitchPin[i] == 0) continue;
+        #if defined(ESP32) || defined(ESP8266)
+        SwitchPin[i];
+        #endif
         pinMode(SwitchPin[i], INPUT);
     }
 }

@@ -44,7 +44,7 @@ int freeRam() {
 
 #elif defined(ARDUINO_RASPBERRY_PI_PICO) || defined(ARDUINO_ARCH_RP2040)
 
-#include <pico/malloc.h>
+#include <malloc.h>
 int freeRam() {
     return mallinfo().fordblks;
 }

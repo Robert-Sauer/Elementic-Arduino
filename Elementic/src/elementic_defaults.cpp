@@ -23,6 +23,7 @@ unsigned long delayTime = 0;
 // Provide the proper netClient for each platform.
 // ------------------------------------------------------------
 #include <Client.h>
+#include "deviceIdentification.h"
 
 #if defined(ESP8266)
 
@@ -36,10 +37,9 @@ unsigned long delayTime = 0;
   static WiFiClient _elementic_wifiClient;
   Client& netClient = _elementic_wifiClient;
 
-#elif defined(ARDUINO_ARCH_AVR)
+#elif ELEMENTIC_HAS_ETHERNET
 
-  // AVR typically uses Ethernet (W5100/W5500 etc.)
-  // You must have Ethernet library available and initialized in your sketch.
+  // Ethernet platforms use W5100/W5200/W5500-compatible clients.
   #include <SPI.h>
   #include <Ethernet.h>
 

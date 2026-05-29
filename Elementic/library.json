@@ -3,28 +3,57 @@
   "version": "1.0.0",
   "description": "Fast configuration tool via serial port, dynamic variables, dynamic inputs, dynamic outputs, MQTT connection, and EEPROM storage",
   "keywords": ["elementic", "USB", "serial", "Controllino", "io", "variables"],
+  "license": "MIT",
   "authors": [
     {
       "name": "Robert Sauer",
-      "email": "rsauer@areanet.nl"
+      "email": "rsauer@areanet.nl",
+      "maintainer": true
     }
   ],
- "frameworks": "arduino",
-  "platforms": "*",
+  "frameworks": "arduino",
+  "platforms": ["atmelavr", "espressif8266", "espressif32"],
   "headers": "Elementic.h",
   "build": {
     "srcDir": "src",
     "includeDir": "include"
   },
+  "examples": [
+    {
+      "name": "Controllino Maxi",
+      "base": "examples/controllino-maxi",
+      "files": ["platformio.ini", "src/main.cpp", "src/ProjectVariablesAutomated.cpp"]
+    },
+    {
+      "name": "ESP8266 ESP-12E",
+      "base": "examples/esp8266-esp12e",
+      "files": ["platformio.ini", "src/main.cpp", "src/ProjectVariablesAutomated.cpp"]
+    },
+    {
+      "name": "ESP32-C6",
+      "base": "examples/esp32-c6",
+      "files": ["platformio.ini", "src/main.cpp", "src/ProjectVariablesAutomated.cpp"]
+    }
+  ],
   "dependencies": [
     {
       "owner": "arduino-libraries",
-      "name": "Ethernet"
+      "name": "Ethernet",
+      "version": "^2.0.0"
     },
     {
       "owner": "knolleary",
-      "name": "PubSubClient"
+      "name": "PubSubClient",
+      "version": "^2.8.0"
     }
-  ]
-  
+  ],
+  "export": {
+    "exclude": [
+      ".pio",
+      "**/.pio",
+      ".vscode",
+      "*.tar.gz",
+      "platformio.ini"
+    ]
+  }
 }
