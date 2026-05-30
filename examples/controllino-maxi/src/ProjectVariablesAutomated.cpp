@@ -18,6 +18,7 @@ const char MQTTServer[] = "";
 const char MQTTUsername[] = "";
 const char MQTTPassword[] = "";
 const uint8_t factorymac[6] = { 0x49, 0xEB, 0xCD, 0x6D, 0xF3, 0x9F };
+const bool factoryDHCP = false;
 const uint8_t factoryip[4] = { 192, 168, 1, 202 };
 const uint8_t factorygateway[4] = { 192, 168, 1, 1 };
 const uint8_t factorysubnet[4] = { 255, 255, 255, 0 };

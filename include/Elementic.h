@@ -194,6 +194,7 @@ extern const char MQTTUsername[];
 extern const char MQTTPassword[] ;
 
 extern const uint8_t factorymac[];
+extern const bool factoryDHCP;
 extern const uint8_t factoryip[];
 extern const uint8_t factorygateway[];
 extern const uint8_t factorysubnet[];

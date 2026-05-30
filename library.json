@@ -1,6 +1,6 @@
 {
   "name": "Elementic",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Fast configuration tool via serial port, dynamic variables, dynamic inputs, dynamic outputs, MQTT connection, and EEPROM storage",
   "keywords": ["elementic", "USB", "serial", "Controllino", "io", "variables"],
   "license": "MIT",
@@ -16,7 +16,7 @@
     "url": "https://github.com/Robert-Sauer/Elementic-Arduino.git"
   },
   "frameworks": "arduino",
-  "platforms": ["atmelavr", "espressif8266", "espressif32"],
+  "platforms": ["atmelavr", "espressif8266", "espressif32", "raspberrypi"],
   "headers": "Elementic.h",
   "build": {
     "srcDir": "src",

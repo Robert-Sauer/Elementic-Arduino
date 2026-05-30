@@ -41,10 +41,12 @@ static uint32_t elementic_lastNetStatusMs = 0;
 
 #if ELEMENTIC_HAS_ETHERNET
   #include <Ethernet.h>
+  #include <SPI.h>
   static bool g_ethStarted = false;
   static uint32_t g_lastEthBeginMs = 0;
   static uint32_t g_lastEthRetryMs = 0;
   static bool g_ethDhcpDeferred = false;
+  static bool g_ethHardwarePrepared = false;
 #endif
 
 static inline uint16_t elementic_getDeviceId() {
@@ -67,6 +69,33 @@ static inline bool elementic_wifi_is_connected() {
 #endif
 
 #if ELEMENTIC_HAS_ETHERNET
+static void elementic_prepare_ethernet_hardware() {
+  if (g_ethHardwarePrepared) return;
+
+  #if defined(ARDUINO_WIZNET_5100S_EVB_PICO) || defined(ARDUINO_WIZNET_5100S_EVB_PICO2) || defined(ARDUINO_WIZNET_5500_EVB_PICO) || defined(ARDUINO_WIZNET_5500_EVB_PICO2)
+    const uint8_t wiznetMiso = 16;
+    const uint8_t wiznetCs   = 17;
+    const uint8_t wiznetSclk = 18;
+    const uint8_t wiznetMosi = 19;
+    const uint8_t wiznetRst  = 20;
+
+    SPI.setRX(wiznetMiso);
+    SPI.setCS(wiznetCs);
+    SPI.setSCK(wiznetSclk);
+    SPI.setTX(wiznetMosi);
+
+    pinMode(wiznetRst, OUTPUT);
+    digitalWrite(wiznetRst, LOW);
+    delayMicroseconds(500);
+    digitalWrite(wiznetRst, HIGH);
+    delay(200);
+
+    Ethernet.init(wiznetCs);
+  #endif
+
+  g_ethHardwarePrepared = true;
+}
+
 static inline bool elementic_eth_has_valid_ip() {
   if (!g_ethStarted) return false;
 
@@ -93,6 +122,7 @@ static inline bool elementic_read_ip(const String& varName, IPAddress& out) {
 }
 
 static inline EthernetHardwareStatus elementic_eth_hw() {
+  elementic_prepare_ethernet_hardware();
   return Ethernet.hardwareStatus();
 }
 
@@ -214,6 +244,8 @@ static void connectToWiFi() {
 
 #if ELEMENTIC_HAS_ETHERNET
 static void connectToEthernet(uint16_t deviceId) {
+  elementic_prepare_ethernet_hardware();
+
   uint8_t mac[6];
   elementic_derive_mac_from_deviceid(deviceId, mac);
 
@@ -271,7 +303,7 @@ void setupNetwork() {
     char macAddress[13];
     elementic_mac_to_string(factorymac, macAddress);
     DefineString("Mac Address", macAddress, PriorityCounter++);
-    DefineBool("DHCP", false, PriorityCounter++);
+    DefineBool("DHCP", factoryDHCP, PriorityCounter++);
     DefineIP("IP Address", factoryip[0], factoryip[1], factoryip[2], factoryip[3], PriorityCounter++);
     DefineIP("Gateway",   factorygateway[0], factorygateway[1], factorygateway[2], factorygateway[3], PriorityCounter++);
     DefineIP("Subnet",    factorysubnet[0], factorysubnet[1], factorysubnet[2], factorysubnet[3], PriorityCounter++);
