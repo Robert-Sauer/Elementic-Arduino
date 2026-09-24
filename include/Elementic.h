@@ -14,6 +14,17 @@ extern const uint16_t ELEMENTIC_DEVICEID;   // user defines in sketch
 #include <Client.h>          // basis-klasse voor WiFiClient / EthernetClient
 #include <PubSubClient.h>
 #include <string.h>
+#include "ElementicContracts.h"
+
+#ifndef ELEMENTIC_WIRE_PROTOCOL_VERSION
+  // The numeric-v1 producer is the safe rollout default. A project may select
+  // v2 only after its Android population includes the v2 codec.
+  #define ELEMENTIC_WIRE_PROTOCOL_VERSION 1
+#endif
+
+#if ELEMENTIC_WIRE_PROTOCOL_VERSION != 1 && ELEMENTIC_WIRE_PROTOCOL_VERSION != 2
+  #error "ELEMENTIC_WIRE_PROTOCOL_VERSION must be 1 or 2"
+#endif
 
 extern Client&      netClient;   // implemented once per sketch
 extern PubSubClient mqttClient;  // same for every board
@@ -38,7 +49,7 @@ extern PubSubClient mqttClient;  // same for every board
   #ifndef InputChannels
   #define InputChannels     19    
   #endif
-  #define MAX_STRING_LENGTH 32
+  #define MAX_STRING_LENGTH 100
   #define MAXNAMELENGTH     14
   #define MAXTOPICLENGTH    20
 #endif
@@ -122,6 +133,22 @@ extern const char defaultvalue_set[]    PROGMEM;
 extern const int device_type PROGMEM;
 extern const long projectid;
 
+// Generated-code metadata ABI 1. Generated projects provide strong
+// definitions; weak manual defaults keep historical sketches buildable and
+// report firmware Project ID zero rather than truncating legacy projectid.
+extern const uint16_t ELEMENTIC_METADATA_ABI;
+extern const uint64_t ELEMENTIC_FIRMWARE_PROJECT_ID;
+extern const uint32_t ELEMENTIC_PROJECT_REVISION;
+extern const uint16_t ELEMENTIC_CONFIG_SCHEMA;
+extern const uint32_t ELEMENTIC_TARGET_REVISION;
+extern const char ELEMENTIC_TARGET_PROFILE[49];
+extern const char ELEMENTIC_MCU_FAMILY[17];
+extern const char ELEMENTIC_APP_VERSION[32];
+extern const char ELEMENTIC_BUILD_ULID[27];
+extern const char ELEMENTIC_RELEASE_ULID[27];
+extern const char ELEMENTIC_LIBRARY_VERSION[];
+extern const uint16_t ELEMENTIC_STORAGE_SCHEMA;
+
 /* Global variables */
 extern uint8_t OutputPin[OutputChannels+1];
 extern uint8_t OutputChannel[OutputChannels+1];
@@ -187,6 +214,25 @@ extern bool logtoSerial;
 extern bool WIFIConnected;
 extern bool EthernetConnected;
 extern bool networkConnected;
+
+enum ElementicMacStatus : uint8_t {
+    ELEMENTIC_MAC_VALID = 0,
+    ELEMENTIC_MAC_CORRECTED = 1,
+    ELEMENTIC_MAC_PROVISIONING_REQUIRED = 2,
+    ELEMENTIC_MAC_ADAPTER_UNSUPPORTED = 3
+};
+
+enum ElementicStorageStatus : uint8_t {
+    ELEMENTIC_STORAGE_COMPILED_ONLY = 0,
+    ELEMENTIC_STORAGE_VALID_SAVED = 1,
+    ELEMENTIC_STORAGE_RECOVERED = 2,
+    ELEMENTIC_STORAGE_CORRUPT = 3,
+    ELEMENTIC_STORAGE_MIGRATION_REQUIRED = 4,
+    ELEMENTIC_STORAGE_UNAVAILABLE = 5
+};
+
+extern ElementicMacStatus elementicMacStatus;
+extern ElementicStorageStatus elementicStorageStatus;
 
 extern const char MQTTName[];
 extern const char MQTTServer[];
@@ -260,6 +306,25 @@ extern void serialwrite(byte i);
 extern void networkCheckLoop();
 extern void setupNetwork();
 extern void DMXstart();
+extern void ResetDynamicVariables();
+extern void elementicResetConfigurationToEmpty();
+extern void elementicLoadFactoryDefaults();
+extern bool elementicApplySharedMac(bool persist);
+extern bool elementicGetEffectiveMac(uint8_t out[6]);
+extern bool elementicProvisionMac(const uint8_t mac[6], const char unitUlid[27]);
+extern void elementicEnterMacReprovisioning();
+extern bool elementicSaveConfiguration();
+extern bool elementicLoadConfiguration();
+extern bool elementicFactoryReset();
+typedef bool (*ElementicStoredRecordVisitor)(uint8_t category, uint8_t field,
+                                             uint16_t item,
+                                             const uint8_t* value,
+                                             uint16_t length,
+                                             void* context);
+extern bool elementicVisitSavedConfiguration(ElementicStoredRecordVisitor visitor,
+                                              void* context,
+                                              uint32_t* generation,
+                                              uint16_t* recordCount);
 // extern void DMXSend();
 
 static inline bool startsWith(const char* s, const char* prefix) {

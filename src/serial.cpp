@@ -6,8 +6,488 @@
 
 #include <Arduino.h>
 #include "Elementic.h"
-#include <EEPROM.h>
+#include "ElementicEeprom.h"
 #define MAX_SERIAL_BUFFER 500
+
+namespace {
+
+void putU16Le(uint8_t* destination, uint16_t value) {
+    destination[0] = static_cast<uint8_t>(value);
+    destination[1] = static_cast<uint8_t>(value >> 8);
+}
+
+void putU32Le(uint8_t* destination, uint32_t value) {
+    for (uint8_t i = 0; i < 4U; ++i) destination[i] = static_cast<uint8_t>(value >> (i * 8U));
+}
+
+void putU64Le(uint8_t* destination, uint64_t value) {
+    for (uint8_t i = 0; i < 8U; ++i) destination[i] = static_cast<uint8_t>(value >> (i * 8U));
+}
+
+uint16_t getU16Le(const uint8_t* source) {
+    return static_cast<uint16_t>(source[0]) |
+           static_cast<uint16_t>(static_cast<uint16_t>(source[1]) << 8);
+}
+
+void sendProtocolAnnouncement() {
+    Serial.write(reinterpret_cast<const uint8_t*>("S011"), 4U);
+    Serial.write(static_cast<uint8_t>(ELEMENTIC_WIRE_PROTOCOL_VERSION));
+    Serial.write(reinterpret_cast<const uint8_t*>("E01"), 3U);
+}
+
+bool sendV2Frame(uint8_t kind, uint16_t sequence, const uint8_t* payload,
+                 uint16_t payloadLength) {
+    uint8_t frame[256];
+    size_t frameLength = 0U;
+    const elementic::V2CodecResult result = elementic::encodeV2Frame(
+        kind, sequence, payload, payloadLength, frame, sizeof(frame), &frameLength);
+    if (result != elementic::V2_CODEC_OK) return false;
+    Serial.write(frame, frameLength);
+    return true;
+}
+
+bool sendV2Tlv(uint8_t kind, uint16_t sequence, uint8_t category,
+               uint8_t field, uint16_t item, const uint8_t* value,
+               uint16_t length) {
+    if (length > 186U || (value == 0 && length != 0U)) return false;
+    uint8_t payload[192];
+    payload[0] = category;
+    payload[1] = field;
+    putU16Le(payload + 2U, item);
+    putU16Le(payload + 4U, length);
+    if (length != 0U) memcpy(payload + 6U, value, length);
+    return sendV2Frame(kind, sequence, payload, static_cast<uint16_t>(length + 6U));
+}
+
+uint16_t boundedTextLength(const char* value, uint16_t maximum) {
+    if (value == 0) return 0U;
+    return static_cast<uint16_t>(strnlen(value, maximum));
+}
+
+void sendV2End(uint16_t sequence, uint32_t capture, uint32_t generation,
+               uint16_t records) {
+    uint8_t payload[10];
+    putU32Le(payload, capture);
+    putU32Le(payload + 4U, generation);
+    putU16Le(payload + 8U, records);
+    sendV2Frame(0x06U, sequence, payload, sizeof(payload));
+}
+
+void sendV2Info(uint16_t sequence) {
+    uint16_t count = 0U;
+    uint8_t value[16];
+    const auto sendBytes = [&](uint8_t field, const uint8_t* bytes, uint16_t length) {
+        if (sendV2Tlv(0x02U, sequence, 3U, field, 0U, bytes, length)) ++count;
+    };
+    const auto sendText = [&](uint8_t field, const char* text, uint16_t maximum) {
+        sendBytes(field, reinterpret_cast<const uint8_t*>(text), boundedTextLength(text, maximum));
+    };
+    putU16Le(value, ELEMENTIC_DEVICEID); sendBytes(9U, value, 2U);
+    value[0] = 2U; sendBytes(0x20U, value, 1U);
+    sendText(0x21U, ELEMENTIC_LIBRARY_VERSION, 31U);
+    sendText(0x22U, ELEMENTIC_APP_VERSION, 31U);
+    putU64Le(value, ELEMENTIC_FIRMWARE_PROJECT_ID); sendBytes(0x23U, value, 8U);
+    sendText(0x24U, ELEMENTIC_TARGET_PROFILE, 48U);
+    putU32Le(value, ELEMENTIC_TARGET_REVISION); sendBytes(0x25U, value, 4U);
+    sendText(0x26U, ELEMENTIC_MCU_FAMILY, 16U);
+    if (ELEMENTIC_BUILD_ULID[0] != '\0') sendText(0x27U, ELEMENTIC_BUILD_ULID, 26U);
+    putU32Le(value, ELEMENTIC_PROJECT_REVISION); sendBytes(0x28U, value, 4U);
+    putU16Le(value, ELEMENTIC_CONFIG_SCHEMA); sendBytes(0x2AU, value, 2U);
+    putU16Le(value, ELEMENTIC_STORAGE_SCHEMA); sendBytes(0x2BU, value, 2U);
+    putU16Le(value, OutputChannels);
+    putU16Le(value + 2U, InputChannels);
+    putU16Le(value + 4U, totalVariables);
+    putU16Le(value + 6U, MAXNAMELENGTH - 1U);
+    putU16Le(value + 8U, MAXTOPICLENGTH - 1U);
+    putU16Le(value + 10U, MAX_STRING_LENGTH - 1U);
+    value[12] = INOUT_MATRIX_COLS;
+    sendBytes(0x2CU, value, 13U);
+    value[0] = static_cast<uint8_t>(elementicMacStatus); sendBytes(0x2DU, value, 1U);
+    value[0] = static_cast<uint8_t>(elementicStorageStatus); sendBytes(0x2EU, value, 1U);
+    if (ELEMENTIC_RELEASE_ULID[0] != '\0') sendText(0x2FU, ELEMENTIC_RELEASE_ULID, 26U);
+    const uint8_t outputTypes[] = {1, 2, 3, 4, 5, 6, 7};
+    sendBytes(0x30U, outputTypes, sizeof(outputTypes));
+    const uint8_t inputTypes[] = {1};
+    sendBytes(0x32U, inputTypes, sizeof(inputTypes));
+    sendV2End(sequence, 0U, 0U, count);
+}
+
+uint32_t configurationGeneration = 1U;
+uint32_t snapshotCapture = 1U;
+
+struct SavedSnapshotContext {
+    uint16_t sequence;
+    uint16_t sent;
+};
+
+void sendV2Result(uint16_t sequence, uint8_t originalKind, uint8_t status);
+
+bool sendSavedRecord(uint8_t category, uint8_t field, uint16_t item,
+                     const uint8_t* value, uint16_t length, void* opaque) {
+    SavedSnapshotContext* context = static_cast<SavedSnapshotContext*>(opaque);
+    if (!sendV2Tlv(0x05U, context->sequence, category, field, item, value, length)) return false;
+    ++context->sent;
+    return true;
+}
+
+void sendV2Snapshot(uint16_t sequence, uint8_t source) {
+    if (source > 1U) {
+        sendV2Result(sequence, 0x03U, 1U);
+        return;
+    }
+    if (source == 1U) {
+        uint32_t savedGeneration = 0U;
+        uint16_t expectedRecords = 0U;
+        if (!elementicVisitSavedConfiguration(0, 0, &savedGeneration, &expectedRecords)) {
+            uint8_t result[6] = {0x03U, 5U, 0, 0, 0, 0};
+            putU32Le(result + 2U, configurationGeneration);
+            sendV2Frame(0x12U, sequence, result, sizeof(result));
+            return;
+        }
+        const uint32_t capture = snapshotCapture++;
+        uint8_t begin[10];
+        putU32Le(begin, capture);
+        putU32Le(begin + 4U, savedGeneration);
+        begin[8] = source;
+        begin[9] = static_cast<uint8_t>(elementicStorageStatus);
+        sendV2Frame(0x04U, sequence, begin, sizeof(begin));
+        SavedSnapshotContext context = {sequence, 0U};
+        if (!elementicVisitSavedConfiguration(sendSavedRecord, &context, 0, 0) ||
+            context.sent != expectedRecords) {
+            sendV2Result(sequence, 0x03U, 5U);
+            return;
+        }
+        sendV2End(sequence, capture, savedGeneration, context.sent);
+        return;
+    }
+    const uint32_t capture = snapshotCapture++;
+    uint8_t begin[10];
+    putU32Le(begin, capture);
+    putU32Le(begin + 4U, configurationGeneration);
+    begin[8] = source;
+    begin[9] = static_cast<uint8_t>(elementicStorageStatus);
+    sendV2Frame(0x04U, sequence, begin, sizeof(begin));
+    uint16_t count = 0U;
+    const auto send = [&](uint8_t category, uint8_t field, uint16_t item,
+                          const uint8_t* bytes, uint16_t length) {
+        if (sendV2Tlv(0x05U, sequence, category, field, item, bytes, length)) ++count;
+    };
+    uint8_t bytes[10];
+    for (uint16_t item = 1U; item <= min(OutputCounter, static_cast<uint8_t>(OutputChannels)); ++item) {
+        putU16Le(bytes, OutputPin[item]); send(0, 0, item, bytes, 2);
+        bytes[0] = OutputType[item]; send(0, 1, item, bytes, 1);
+        putU16Le(bytes, OutputRelay[item]); send(0, 2, item, bytes, 2);
+        bytes[0] = OutputMinValue[item]; send(0, 3, item, bytes, 1);
+        bytes[0] = OutputMaxValue[item]; send(0, 4, item, bytes, 1);
+        bytes[0] = OutputDefaultValue[item]; send(0, 5, item, bytes, 1);
+        send(0, 6, item, reinterpret_cast<const uint8_t*>(Output_Name[item]), boundedTextLength(Output_Name[item], MAXNAMELENGTH));
+        send(0, 7, item, reinterpret_cast<const uint8_t*>(MQTT_Output[item]), boundedTextLength(MQTT_Output[item], MAXTOPICLENGTH));
+        bytes[0] = OutputValueActual[item]; send(0, 8, item, bytes, 1);
+        bytes[0] = OutputStatus[item]; send(0, 9, item, bytes, 1);
+        putU16Le(bytes, OutputChannel[item]); send(0, 10, item, bytes, 2);
+    }
+    for (uint16_t item = 1U; item <= static_cast<uint16_t>(min(SwitchCounter, static_cast<int>(InputChannels))); ++item) {
+        putU16Le(bytes, SwitchPin[item]); send(1, 0, item, bytes, 2);
+        const uint8_t links = min(InOutMatrixCouter[item], static_cast<uint8_t>(INOUT_MATRIX_COLS));
+        for (uint8_t i = 0; i < links; ++i) putU16Le(bytes + i * 2U, InOutMatrix[item][i]);
+        send(1, 1, item, bytes, links * 2U);
+        send(1, 2, item, reinterpret_cast<const uint8_t*>(MQTT_Input[item]), boundedTextLength(MQTT_Input[item], MAXTOPICLENGTH));
+        bytes[0] = 1U; send(1, 3, item, bytes, 1);
+        send(1, 5, item, reinterpret_cast<const uint8_t*>(Input_Name[item]), boundedTextLength(Input_Name[item], MAXNAMELENGTH));
+        bytes[0] = InputStatus[item]; send(1, 6, item, bytes, 1);
+    }
+    for (int priority = 1; priority < PriorityCounter; ++priority) {
+        const int index = findVariableIndexByPriority(priority);
+        if (index < 0) continue;
+        bytes[0] = static_cast<uint8_t>(variables[index].type); send(2, 0, priority, bytes, 1);
+        send(2, 1, priority, reinterpret_cast<const uint8_t*>(variables[index].name.c_str()), variables[index].name.length());
+        switch (variables[index].type) {
+            case DYNAMIC_STRING: send(2, 2, priority, reinterpret_cast<const uint8_t*>(variables[index].value.strVal), boundedTextLength(variables[index].value.strVal, MAX_STRING_LENGTH)); break;
+            case DYNAMIC_PASSWORD: send(2, 2, priority, reinterpret_cast<const uint8_t*>(variables[index].value.passVal), boundedTextLength(variables[index].value.passVal, MAX_STRING_LENGTH)); break;
+            case DYNAMIC_BYTE:
+            case DYNAMIC_BOOL: bytes[0] = variables[index].value.byteVal; send(2, 2, priority, bytes, 1); break;
+            case DYNAMIC_INT: putU16Le(bytes, static_cast<uint16_t>(variables[index].value.intVal)); send(2, 2, priority, bytes, 2); break;
+            case DYNAMIC_IP: send(2, 2, priority, variables[index].value.ipVal, 4); break;
+        }
+        bytes[0] = DynamicVariableStatus[index]; send(2, 5, priority, bytes, 1);
+    }
+    sendV2End(sequence, capture, configurationGeneration, count);
+}
+
+void sendV2Result(uint16_t sequence, uint8_t originalKind, uint8_t status) {
+    uint8_t payload[6] = {originalKind, status, 0, 0, 0, 0};
+    putU32Le(payload + 2U, configurationGeneration);
+    sendV2Frame(0x12U, sequence, payload, sizeof(payload));
+}
+
+bool validUtf8NoNul(const uint8_t* value, uint16_t length) {
+    uint16_t position = 0U;
+    while (position < length) {
+        const uint8_t first = value[position++];
+        if (first == 0U) return false;
+        if (first < 0x80U) continue;
+        uint8_t continuation = 0U;
+        uint32_t codepoint = 0U;
+        if ((first & 0xE0U) == 0xC0U) { continuation = 1U; codepoint = first & 0x1FU; if (codepoint < 2U) return false; }
+        else if ((first & 0xF0U) == 0xE0U) { continuation = 2U; codepoint = first & 0x0FU; }
+        else if ((first & 0xF8U) == 0xF0U) { continuation = 3U; codepoint = first & 0x07U; }
+        else return false;
+        if (position + continuation > length) return false;
+        for (uint8_t i = 0U; i < continuation; ++i) {
+            const uint8_t next = value[position++];
+            if ((next & 0xC0U) != 0x80U) return false;
+            codepoint = (codepoint << 6) | (next & 0x3FU);
+        }
+        if ((continuation == 2U && codepoint < 0x800U) ||
+            (continuation == 3U && codepoint < 0x10000UL) ||
+            (codepoint >= 0xD800U && codepoint <= 0xDFFFU) || codepoint > 0x10FFFFUL) return false;
+    }
+    return true;
+}
+
+struct V2Write {
+    uint8_t category;
+    uint8_t field;
+    uint16_t item;
+    uint16_t length;
+    const uint8_t* value;
+};
+
+bool parseV2Write(const elementic::V2FrameView& frame, V2Write& write) {
+    if (frame.payloadLength < 6U) return false;
+    write.category = frame.payload[0];
+    write.field = frame.payload[1];
+    write.item = getU16Le(frame.payload + 2U);
+    write.length = getU16Le(frame.payload + 4U);
+    write.value = frame.payload + 6U;
+    if (write.length != frame.payloadLength - 6U) return false;
+    if (write.category == 0U) {
+        if (write.item == 0U || write.item > OutputChannels) return false;
+        if (write.field == 0U || write.field == 2U || write.field == 10U) return write.length == 2U && getU16Le(write.value) <= 255U;
+        if (write.field == 1U) return write.length == 1U && write.value[0] >= 1U && write.value[0] <= 7U;
+        if (write.field >= 3U && write.field <= 5U) return write.length == 1U;
+        if (write.field == 6U) return write.length <= 63U && write.length < MAXNAMELENGTH && validUtf8NoNul(write.value, write.length);
+        if (write.field == 7U) return write.length <= 127U && write.length < MAXTOPICLENGTH && validUtf8NoNul(write.value, write.length);
+        if (write.field == 8U) return write.length == 1U;
+        return false;
+    }
+    if (write.category == 1U) {
+        if (write.item == 0U || write.item > InputChannels) return false;
+        if (write.field == 0U) return write.length == 2U && getU16Le(write.value) <= 255U;
+        if (write.field == 1U) {
+            if ((write.length & 1U) != 0U || write.length > INOUT_MATRIX_COLS * 2U) return false;
+            for (uint16_t i = 0U; i < write.length; i += 2U) {
+                const uint16_t output = getU16Le(write.value + i);
+                if (output == 0U || output > OutputCounter) return false;
+            }
+            return true;
+        }
+        if (write.field == 2U) return write.length <= 127U && write.length < MAXTOPICLENGTH && validUtf8NoNul(write.value, write.length);
+        if (write.field == 3U) return write.length == 1U && write.value[0] == 1U;
+        if (write.field == 5U) return write.length <= 63U && write.length < MAXNAMELENGTH && validUtf8NoNul(write.value, write.length);
+        return false;
+    }
+    if (write.category == 2U) {
+        if (write.field != 2U || write.item == 0U) return false;
+        const int index = findVariableIndexByPriority(write.item);
+        if (index < 0 || index >= totalVariables) return false;
+        switch (variables[index].type) {
+            case DYNAMIC_STRING:
+            case DYNAMIC_PASSWORD: return write.length <= 127U && write.length < MAX_STRING_LENGTH && validUtf8NoNul(write.value, write.length);
+            case DYNAMIC_BYTE: return write.length == 1U;
+            case DYNAMIC_BOOL: return write.length == 1U && write.value[0] <= 1U;
+            case DYNAMIC_INT: return write.length == 2U;
+            case DYNAMIC_IP: return write.length == 4U;
+        }
+        return false;
+    }
+    return write.category == 3U && write.field == 41U && write.item == 0U &&
+           write.length == 32U && elementicMacStatus == ELEMENTIC_MAC_PROVISIONING_REQUIRED;
+}
+
+uint8_t applyV2Write(const V2Write& write) {
+    if (write.category == 0U) {
+        if (write.item > OutputCounter) {
+            if (write.field != 1U) return 1U;
+            OutputCounter = static_cast<uint8_t>(write.item);
+        }
+        switch (write.field) {
+            case 0: OutputPin[write.item] = static_cast<uint8_t>(getU16Le(write.value)); break;
+            case 1: OutputType[write.item] = write.value[0]; break;
+            case 2: OutputRelay[write.item] = static_cast<uint8_t>(getU16Le(write.value)); setrelays(); break;
+            case 3: OutputMinValue[write.item] = write.value[0]; break;
+            case 4: OutputMaxValue[write.item] = write.value[0]; break;
+            case 5: OutputDefaultValue[write.item] = write.value[0]; break;
+            case 6: memcpy(Output_Name[write.item], write.value, write.length); Output_Name[write.item][write.length] = '\0'; break;
+            case 7: memcpy(MQTT_Output[write.item], write.value, write.length); MQTT_Output[write.item][write.length] = '\0'; break;
+            case 8: OutputValueActual[write.item] = write.value[0]; break;
+            case 10: OutputChannel[write.item] = static_cast<uint8_t>(getU16Le(write.value)); break;
+        }
+    } else if (write.category == 1U) {
+        if (write.item > static_cast<uint16_t>(SwitchCounter)) {
+            if (write.field != 3U) return 1U;
+            SwitchCounter = write.item;
+        }
+        if (write.field == 0U) SwitchPin[write.item] = static_cast<uint8_t>(getU16Le(write.value));
+        else if (write.field == 1U) {
+            InOutMatrixCouter[write.item] = static_cast<uint8_t>(write.length / 2U);
+            for (uint8_t i = 0; i < InOutMatrixCouter[write.item]; ++i) InOutMatrix[write.item][i] = static_cast<uint8_t>(getU16Le(write.value + i * 2U));
+        } else if (write.field == 2U) { memcpy(MQTT_Input[write.item], write.value, write.length); MQTT_Input[write.item][write.length] = '\0'; }
+        else if (write.field == 5U) { memcpy(Input_Name[write.item], write.value, write.length); Input_Name[write.item][write.length] = '\0'; }
+    } else if (write.category == 2U) {
+        const int index = findVariableIndexByPriority(write.item);
+        switch (variables[index].type) {
+            case DYNAMIC_STRING:
+                memcpy(variables[index].value.strVal, write.value, write.length); variables[index].value.strVal[write.length] = '\0';
+                if (variables[index].name == "Mac Address") {
+                    elementicApplySharedMac(false);
+                    if (elementicMacStatus == ELEMENTIC_MAC_CORRECTED) return 8U;
+                    if (elementicMacStatus == ELEMENTIC_MAC_PROVISIONING_REQUIRED) return 9U;
+                }
+                break;
+            case DYNAMIC_PASSWORD: memcpy(variables[index].value.passVal, write.value, write.length); variables[index].value.passVal[write.length] = '\0'; break;
+            case DYNAMIC_BYTE:
+            case DYNAMIC_BOOL: variables[index].value.byteVal = write.value[0]; break;
+            case DYNAMIC_INT: variables[index].value.intVal = static_cast<int16_t>(getU16Le(write.value)); break;
+            case DYNAMIC_IP: memcpy(variables[index].value.ipVal, write.value, 4U); break;
+        }
+        DynamicVariablesUpdated = true;
+    } else {
+        char unitUlid[27];
+        memcpy(unitUlid, write.value + 6U, 26U);
+        unitUlid[26] = '\0';
+        if (!elementicProvisionMac(write.value, unitUlid)) return 5U;
+    }
+    ++configurationGeneration;
+    return 0U;
+}
+
+uint16_t lastMutationSequence = 0U;
+uint32_t lastMutationHash = 0U;
+uint8_t lastMutationKind = 0U;
+uint8_t lastMutationStatus = 0U;
+
+uint8_t processV2Command(const elementic::V2FrameView& decoded) {
+    if (decoded.payloadLength != 3U) {
+        sendV2Result(decoded.sequence, decoded.kind, 1U);
+        return 1U;
+    }
+    const uint8_t command = decoded.payload[0];
+    const uint16_t argument = getU16Le(decoded.payload + 1U);
+    uint8_t status = 0U;
+    if ((command <= 4U || command == 7U) && argument != 0U) status = 1U;
+    else if (command == 0U) SerialCommand = REBOOT;
+    else if (command == 1U) status = elementicSaveConfiguration() ? 0U : 5U;
+    else if (command == 2U) {
+        elementicLoadFactoryDefaults();
+        status = elementicLoadConfiguration() ? 0U : 5U;
+        ++configurationGeneration;
+    } else if (command == 3U) { status = elementicFactoryReset() ? 0U : 5U; ++configurationGeneration; }
+    else if (command == 4U) { /* no stored error latch yet */ }
+    else if (command == 5U && argument >= 1U && argument <= OutputCounter) DeleteOutput = argument;
+    else if (command == 6U && argument >= 1U && argument <= static_cast<uint16_t>(SwitchCounter)) DeleteInput = argument;
+    else if (command == 7U) elementicEnterMacReprovisioning();
+    else status = 1U;
+    sendV2Result(decoded.sequence, decoded.kind, status);
+    return status;
+}
+
+void processV2Frame(const uint8_t* frame, size_t frameLength) {
+    uint8_t body[elementic::V2_MAX_BODY];
+    elementic::V2FrameView decoded = {};
+    if (elementic::decodeV2Frame(frame, frameLength, body, sizeof(body), &decoded) != elementic::V2_CODEC_OK ||
+        decoded.sequence == 0U) return;
+    if (decoded.kind == 0x01U && decoded.payloadLength == 0U) {
+        sendV2Info(decoded.sequence);
+    } else if (decoded.kind == 0x03U && decoded.payloadLength == 1U) {
+        sendV2Snapshot(decoded.sequence, decoded.payload[0]);
+    } else if (decoded.kind == 0x10U || decoded.kind == 0x11U) {
+        const uint32_t requestHash = elementic::crc32(frame, frameLength);
+        if (decoded.sequence == lastMutationSequence) {
+            if (requestHash == lastMutationHash && decoded.kind == lastMutationKind) {
+                sendV2Result(decoded.sequence, decoded.kind, lastMutationStatus);
+            } else sendV2Result(decoded.sequence, decoded.kind, 7U);
+            return;
+        }
+        uint8_t status = 0U;
+        if (decoded.kind == 0x10U) {
+            V2Write write = {};
+            status = parseV2Write(decoded, write) ? applyV2Write(write) : 1U;
+            sendV2Result(decoded.sequence, decoded.kind, status);
+        } else {
+            status = processV2Command(decoded);
+        }
+        lastMutationSequence = decoded.sequence;
+        lastMutationHash = requestHash;
+        lastMutationKind = decoded.kind;
+        lastMutationStatus = status;
+    } else {
+        sendV2Result(decoded.sequence, decoded.kind, 2U);
+    }
+}
+
+bool containsLegacyMarker(const uint8_t* value, uint16_t length) {
+    static const char* markers[] = {"S01", "S02", "E01", "E02", "REQ01"};
+    for (uint8_t marker = 0; marker < 5U; ++marker) {
+        const size_t markerLength = strlen(markers[marker]);
+        if (length < markerLength) continue;
+        for (uint16_t i = 0; i <= length - markerLength; ++i) {
+            if (memcmp(value + i, markers[marker], markerLength) == 0) return true;
+        }
+    }
+    return false;
+}
+
+bool validateV1Command(const uint8_t* frame, size_t length) {
+    if (frame == 0 || length < 9U || memcmp(frame, "S01", 3U) != 0 ||
+        memcmp(frame + length - 3U, "E01", 3U) != 0) return false;
+    size_t position = 3U;
+    const size_t end = length - 3U;
+    while (position < end) {
+        if (position + 7U > end || memcmp(frame + position, "S02", 3U) != 0) return false;
+        position += 3U;
+        const uint8_t category = frame[position++];
+        const uint8_t field = frame[position++];
+        const uint8_t item = frame[position++];
+        const uint8_t declared = frame[position++];
+        uint16_t width = declared;
+        bool text = false;
+        if (category == 0U) {
+            if (item == 0U || item > OutputChannels || field > 8U) return false;
+            if (field == 6U) { width = declared; text = true; if (width >= MAXNAMELENGTH) return false; }
+            else if (field == 7U) { width = declared; text = true; if (width >= MAXTOPICLENGTH) return false; }
+            else width = 1U;
+        } else if (category == 1U) {
+            if (item == 0U || item > InputChannels ||
+                !(field == 0U || field == 1U || field == 2U || field == 5U)) return false;
+            if (field == 0U) width = 1U;
+            else if (field == 1U) { width = declared; if (width > INOUT_MATRIX_COLS) return false; }
+            else { width = declared; text = true; if ((field == 2U && width >= MAXTOPICLENGTH) || (field == 5U && width >= MAXNAMELENGTH)) return false; }
+        } else if (category == 2U) {
+            if (field != 2U) return false;
+            const int index = findVariableIndexByPriority(item);
+            if (index < 0 || index >= totalVariables) return false;
+            switch (variables[index].type) {
+                case DYNAMIC_STRING:
+                case DYNAMIC_PASSWORD: width = declared; text = true; if (width > 29U || width >= MAX_STRING_LENGTH) return false; break;
+                case DYNAMIC_BYTE:
+                case DYNAMIC_BOOL: width = 1U; break;
+                case DYNAMIC_INT: width = 2U; break;
+                case DYNAMIC_IP: width = 4U; break;
+            }
+            if (declared != 0U && declared != width) return false;
+        } else if (category == 3U) {
+            if (item != 0U || !(field == 6U || field == 14U || field == 15U)) return false;
+            width = 2U;
+        } else return false;
+        if (position + width + 3U > end || memcmp(frame + position + width, "E02", 3U) != 0) return false;
+        if (text && containsLegacyMarker(frame + position, width)) return false;
+        position += width + 3U;
+    }
+    return position == end;
+}
+
+}  // namespace
 
 template <typename Func>
 void ProcessVariablesByPriority(Func func) {
@@ -20,6 +500,7 @@ void serialsetup() {
     Serial.begin(115200);
     // Serial.println("Serial port initiated. . .");
     databuffersize = 255; // kan niet hoger zijn dan 255
+    sendProtocolAnnouncement();
 }
 
 void serialwrite(byte i) {
@@ -31,7 +512,7 @@ void serialwrite(byte i) {
     databufferposition++;
 }
 
-void serialPrintLimited(char data[400]) {
+void serialPrintLimited(const char* data) {
     size_t dataLen = strlen(data);
     if ((databufferposition + dataLen) >= databuffersize) {
         delay(1);
@@ -166,11 +647,12 @@ void SendAllData(bool ER, bool SD, bool MEM) { // ER = store to EEPROM, SD = sen
     if (SD) { snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/LOG"); }
     if (ER) { snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/LOG"); }
     int EP = 0; // EEPROM pointer
-    char tempstring[20];
 
     if (SD) { serialPrintLimited("S01"); } // Initiate frame
     if (SD) { serialPrintLimited("1"); }    if (ER) { EEPROM.write(EP++, (byte)1); } // Type
-    if (SD) { serialPrintLimited("1"); }    if (ER) { EEPROM.write(EP++, (byte)1); } // Version
+    // Wire v1 is numeric 0x01. EEPROM schema 1 remains numeric byte 1 as it
+    // always was; correcting the wire byte must not rewrite storage.
+    if (SD) { serialwrite(elementic::WIRE_V1); } if (ER) { EEPROM.write(EP++, (byte)1); } // Version
 
     // TYPE01:3, TYPE02: 10: Number of Outputs, 11: Number of maximum Outputs, 12: Number of Inputs, 13: Number of Maximum Inputs
     // Maximal number of inputs
@@ -415,7 +897,7 @@ void SendAllData(bool ER, bool SD, bool MEM) { // ER = store to EEPROM, SD = sen
 
     // End frame marker
 
-    serialPrintLimited("E01");
+    if (SD) { serialPrintLimited("E01"); }
 }
 
 void clearIncomingData() {
@@ -462,6 +944,13 @@ void ReadAllDataFromEEPROM() {
         byte i2 = 0;
         switch (type01) {
             case 0: // Output
+                if (id == 0 || id > OutputChannels) {
+                    EP += length;
+                    snprintf(debugBuf, sizeof(debugBuf),
+                             "EEPROM output id %u out of range; skipped", id);
+                    logging(LOG_CAUTION, debugBuf);
+                    break;
+                }
                 if (OutputCounter < id) { OutputCounter = id; } // removed 27-11-2025 since id is stored as well
                 switch (type02) {
                     case 0: { // channel
@@ -557,6 +1046,13 @@ void ReadAllDataFromEEPROM() {
                 }
                 break;
             case 1: // Input
+                if (id == 0 || id > InputChannels) {
+                    EP += length;
+                    snprintf(debugBuf, sizeof(debugBuf),
+                             "EEPROM input id %u out of range; skipped", id);
+                    logging(LOG_CAUTION, debugBuf);
+                    break;
+                }
                 //if (SwitchCounter < id) { SwitchCounter = id; } // removed 27-11-2025 since id is stored as well
                 switch (type02) {
                     case 0: { // channel/pin
@@ -662,7 +1158,9 @@ void ReadAllDataFromEEPROM() {
                                 break;
                             }
                             case DYNAMIC_INT: {
-                                int intVal = (EEPROM.read(EP++) << 8) | EEPROM.read(EP++);
+                                const uint8_t highByte = EEPROM.read(EP++);
+                                const uint8_t lowByte = EEPROM.read(EP++);
+                                int intVal = (static_cast<int>(highByte) << 8) | lowByte;
                                 variables[id].value.intVal = intVal;
                                 sprintf(debugBuf, "Variable[%d] Value (Int) = %d", id, intVal);
                                 logging(LOG_INFO,debugBuf);
@@ -692,7 +1190,7 @@ void ReadAllDataFromEEPROM() {
                                 }
                                 passBuf[i2] = '\0';
                                 strcpy(variables[id].value.passVal, passBuf);
-                                sprintf(debugBuf, "Variable[%d] Value (Password) = %s", id, passBuf);
+                                sprintf(debugBuf, "Variable[%d] Value (Password) updated", id);
                                 logging(LOG_INFO,debugBuf);
                                 break;
                             }
@@ -716,16 +1214,21 @@ void ReadAllDataFromEEPROM() {
             }
             case 3: // System (number of inputs and outputs stored in EEPROM)
             {
-                // FIX: system blocks are written as 4 bytes only:
-                // [type01][type02][valueLow][valueHigh]
-                // We already consumed those into type01, type02, id, length.
-                // Use 'id' as the low byte and do NOT read extra bytes.
-                int val = (EEPROM.read(EP + 1) << 8) | EEPROM.read(EP);
+                // Released storage schema 1 has a four-byte header followed by
+                // a two-byte little-endian value. The old comment that called
+                // this a four-byte record was incorrect; tagged v1.0.0 and
+                // main both write and consume all six bytes.
+                if (EP + 2 > EEPROM.length()) {
+                    logging(LOG_WARNING, "Truncated EEPROM system record");
+                    return;
+                }
+                const int val = static_cast<int>(EEPROM.read(EP)) |
+                                (static_cast<int>(EEPROM.read(EP + 1)) << 8);
                 EP += 2;
 
                 switch (type02) {
                     case 10: { // Number of Outputs (current)
-                        OutputCounter = val;
+                        OutputCounter = min(val, static_cast<int>(OutputChannels));
                         break;
                     }
                     case 11: {
@@ -734,7 +1237,7 @@ void ReadAllDataFromEEPROM() {
                         break;
                     }
                     case 12: { // Number of Inputs (current)
-                        SwitchCounter = val;
+                        SwitchCounter = min(val, static_cast<int>(InputChannels));
                         break;
                     }
                     case 13: {
@@ -862,7 +1365,10 @@ void serialloop() {
             incomingdata[i + 2] == 'Q' &&
             incomingdata[i + 3] == '0' &&
             incomingdata[i + 4] == '1') {
-            SendAllData(false, true, false); // (ER, SD, MEM)
+            sendProtocolAnnouncement();
+            #if ELEMENTIC_WIRE_PROTOCOL_VERSION == 1
+              SendAllData(false, true, false); // transitional numeric-v1 sync
+            #endif
             clearIncomingData();
             return;
         }
@@ -885,6 +1391,27 @@ void serialloop() {
         }
     }
     if (endPos == -1) return;
+
+    const size_t completeFrameLength = static_cast<size_t>(endPos + 3 - startPos);
+    if (completeFrameLength >= 8U && incomingdata[startPos + 3] == '1' &&
+        incomingdata[startPos + 4] == elementic::WIRE_V2) {
+        #if ELEMENTIC_WIRE_PROTOCOL_VERSION == 2
+          processV2Frame(incomingdata + startPos, completeFrameLength);
+        #endif
+        clearIncomingData();
+        return;
+    }
+
+    #if ELEMENTIC_WIRE_PROTOCOL_VERSION != 1
+      clearIncomingData();
+      return;
+    #endif
+
+    if (!validateV1Command(incomingdata + startPos, completeFrameLength)) {
+        logging(LOG_CAUTION, "Rejected malformed serial command");
+        clearIncomingData();
+        return;
+    }
 
     // 4) Parse all "S02" sub-blocks between S01 and E01
     int counter = startPos + 3;
@@ -1121,14 +1648,22 @@ void serialloop() {
 
                             if (variables[idx].type == DYNAMIC_STRING) {
                                 strcpy(variables[idx].value.strVal, ReceivedString);
+                                if (variables[idx].name == "Mac Address") {
+                                    elementicApplySharedMac(false);
+                                }
                             }
                             if (variables[idx].type == DYNAMIC_PASSWORD) {
                                 strcpy(variables[idx].value.passVal, ReceivedString);
                             }
 
-                            snprintf(msgmqtt2, sizeof(msgmqtt2),
-                                    "Generic String updated: id=%d, Text=%s",
-                                    id, ReceivedString);
+                            if (variables[idx].type == DYNAMIC_PASSWORD) {
+                                snprintf(msgmqtt2, sizeof(msgmqtt2),
+                                        "Generic Password updated: id=%d", id);
+                            } else {
+                                snprintf(msgmqtt2, sizeof(msgmqtt2),
+                                        "Generic String updated: id=%d, Text=%s",
+                                        id, ReceivedString);
+                            }
                             logging(LOG_INFO, msgmqtt2);
                         }
 

@@ -42,6 +42,15 @@ Supported in the current library:
 - ESP8266
 - AVR boards
 
+Support is target-profile specific. A successful compile alone is not proof of
+EEPROM, MAC override, network or DMX behavior. Consult
+`docs/CR-0004-stage-f-hardware-matrix.md` before selecting a production board.
+
+The generated-code contract also requires metadata ABI 1 and an idempotent
+`elementicLoadFactoryDefaults()`. Manual projects should start from
+`extras/manual/ElementicBuildMetadata.cpp`. Numeric wire v1 is the default;
+wire v2 is an independent build selection, not a Library/Git version alias.
+
 Required libraries:
 
 - `PubSubClient`

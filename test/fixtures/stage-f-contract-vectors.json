@@ -1,0 +1,29 @@
+{
+  "fixture_version": 1,
+  "provenance": "Elementic Docs CR-0004 contract set 1, vectors.json",
+  "wire": {
+    "numeric_v1": "5330313101533032030900000300453032453031",
+    "v2_project_id": "5330313102020001000e00032300000800ac13014fb2674ad87d5db6e7dc453031",
+    "v2_markers": "5330313102050001001300020200010d007d7330317d6530317d7330327d6530327d5d1f7c1385453031",
+    "v2_empty_request": "533031310201000100000063293ac8453031"
+  },
+  "storage": {
+    "schema2": "4543463202002000010000000e000000000000000000000001000100234bfae10340000008000100000001000000a5",
+    "provisioning": "4555503101001000010000002000000002aabbccddee303141525a334e44454b545356345252464651363947354634303ec8df3ea5"
+  },
+  "mac": {
+    "valid": {
+      " 02-aa-bb-cc-dd-ee\r\n": "02AABBCCDDEE",
+      "02:aa:bb:cc:dd:ee": "02AABBCCDDEE",
+      "02AABBCCDDEE": "02AABBCCDDEE"
+    },
+    "invalid": [
+      "01AABBCCDDEE",
+      "000000000000",
+      "FFFFFFFFFFFF",
+      "02:AA-BB:CC:DD:EE",
+      "02AABBCCDDEG",
+      "02AABBCCDD"
+    ]
+  }
+}

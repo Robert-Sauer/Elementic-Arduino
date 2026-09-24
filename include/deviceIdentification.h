@@ -43,12 +43,13 @@
 
 // RP2040 Pico W / Pico 2W. Do not treat all RP2040 boards as WiFi boards:
 // Wiznet RP2040 boards use Ethernet instead.
-#elif defined(ARDUINO_ARCH_RP2040) && !defined(ARDUINO_WIZNET_5100S_EVB_PICO)
+#elif defined(ARDUINO_ARCH_RP2040) && \
+      (defined(ARDUINO_RASPBERRY_PI_PICO_W) || defined(ARDUINO_NANO_RP2040_CONNECT))
   #define ELEMENTIC_HAS_WIFI 1
   #define ELEMENTIC_WIFI_DRIVER ELEMENTIC_WIFI_DRIVER_PICOW
 
 // Arduino Opta (core defines ARDUINO_OPTA or similar; keep it permissive)
-#elif defined(ARDUINO_OPTA) || defined(ARDUINO_PORTENTA_C33) || defined(ARDUINO_ARCH_MBED)
+#elif defined(ARDUINO_OPTA) || defined(ARDUINO_PORTENTA_C33)
   // If your Opta target uses WiFi API, enable it
   #define ELEMENTIC_HAS_WIFI 1
   #define ELEMENTIC_WIFI_DRIVER ELEMENTIC_WIFI_DRIVER_OPTA
@@ -64,7 +65,7 @@
 #define ELEMENTIC_ETH_DRIVER   ELEMENTIC_ETH_DRIVER_NONE
 
 // AVR (Uno/Mega/Controllino + Wiznet shields)
-#if !ELEMENTIC_HAS_WIFI
+#if defined(ARDUINO_ARCH_AVR) && !ELEMENTIC_HAS_WIFI
   // If it isn't a WiFi platform, you likely want Ethernet on classic Arduino setups.
   // If you have a non-network device, you can disable this by defining ELEMENTIC_FORCE_NO_ETHERNET.
   #ifndef ELEMENTIC_FORCE_NO_ETHERNET

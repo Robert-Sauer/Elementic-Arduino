@@ -5,7 +5,7 @@
  */
 
 #include <Arduino.h>
-#include <EEPROM.h>
+#include "ElementicEeprom.h"
 #include "Elementic.h"
 
 // tell the CPP that netClient is created elsewhere
@@ -23,19 +23,6 @@ const unsigned long DMXInterval = 10; //milliseconds;
 //const int device_type = 0;
 
 namespace {
-void ClearEEPROMForFactorySettings() {
-  const int eepromLength = EEPROM.length();
-  for (int i = 0; i < eepromLength; i++) {
-    EEPROM.write(i, 0xFF);
-  }
-
-  #if defined(ESP8266) || defined(ESP32)
-    EEPROM.commit();
-  #endif
-
-  EEPROMStorage = 0;
-}
-
 void RestartDevice() {
   delay(100);
 
@@ -48,6 +35,55 @@ void RestartDevice() {
     NVIC_SystemReset();
   #endif
 }
+
+void SetOutputsSafe() {
+  for (uint16_t i = 0; i <= OutputChannels; ++i) {
+    OutputValueActual[i] = 0;
+    OutputValueMemory[i] = 0;
+    MQTTUpdate[i] = false;
+  }
+  setrelays();
+}
+
+void ClearRuntimeConfiguration() {
+  SetOutputsSafe();
+  memset(OutputPin, 0, sizeof(OutputPin));
+  memset(OutputChannel, 0, sizeof(OutputChannel));
+  memset(OutputRelay, 0, sizeof(OutputRelay));
+  memset(OutputType, 0, sizeof(OutputType));
+  memset(OutputValueMemory, 0, sizeof(OutputValueMemory));
+  memset(OutputValueActual, 0, sizeof(OutputValueActual));
+  memset(OutputMinValue, 0, sizeof(OutputMinValue));
+  memset(OutputMaxValue, 0, sizeof(OutputMaxValue));
+  memset(OutputDefaultValue, 0, sizeof(OutputDefaultValue));
+  memset(Output_Name, 0, sizeof(Output_Name));
+  memset(MQTT_Output, 0, sizeof(MQTT_Output));
+  memset(SwitchPin, 0, sizeof(SwitchPin));
+  memset(InOutMatrixCouter, 0, sizeof(InOutMatrixCouter));
+  memset(InOutMatrix, 0, sizeof(InOutMatrix));
+  memset(Input_Name, 0, sizeof(Input_Name));
+  memset(MQTT_Input, 0, sizeof(MQTT_Input));
+  OutputCounter = 0;
+  SwitchCounter = 0;
+  ResetDynamicVariables();
+}
+}
+
+#if defined(__GNUC__)
+__attribute__((weak))
+#endif
+void elementicLoadFactoryDefaults() {
+  elementicResetConfigurationToEmpty();
+  setupNetwork();
+  genericsetupvariables();
+  MQTTSetupVariables();
+  outputsetupvariables();
+  inputsetupvariables();
+  elementicApplySharedMac(false);
+}
+
+void elementicResetConfigurationToEmpty() {
+  ClearRuntimeConfiguration();
 }
 
 // Internal timers
@@ -130,7 +166,7 @@ uint8_t  incomingdata[500]         = {0};
 int      data_index                = 0;
 uint8_t  databuffersize            = 0;
 int      databufferposition        = 0;
-int      SerialCommand             = 0;
+int      SerialCommand             = -1;
 int      DeleteInput               = 0;
 int      DeleteOutput              = 0;
 int      EEPROMStorage             = 0;
@@ -177,7 +213,6 @@ void ElementicSetup(){
   #endif
 
   serialsetup();
-  setupNetwork();
   logging(LOG_INFO,"Booting. . .");
 
   #if defined(ESP8266)
@@ -191,11 +226,8 @@ void ElementicSetup(){
 
   DMXstart();
 
-  genericsetupvariables();
-  MQTTSetupVariables();
-  outputsetupvariables();
-  inputsetupvariables();
-  ReadAllDataFromEEPROM();
+  elementicLoadFactoryDefaults();
+  elementicLoadConfiguration();
   setrelays();
   SendSystem(DEVICETYPE, ELEMENTIC_DEVICEID);
   connectNetwork();
@@ -226,23 +258,33 @@ void ElementicLoop(){
   unsigned long currentMillis = millis();
 
   switch (SerialCommand) { // RAM/EEPROM Status, consider generic loop for Elementic
+  case REBOOT:
+    SerialCommand = -1;
+    RestartDevice();
+    break;
   case RAMTOEEPROM:
     // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", GetStringValue("MQTTName").c_str(), "/LOG");
     // mqttClient.publish(msgmqtt, "Store Data to EEPROM");
     logging(LOG_INFO,"Store Data to EEPROM");
-    SendAllData(true, false, true);
+    if (!elementicSaveConfiguration()) {
+      logging(LOG_WARNING,"Store configuration failed");
+    }
     break;
   case EEPROMTORAM:
     // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", GetStringValue("MQTTName").c_str(), "/LOG");
     // mqttClient.publish(msgmqtt, "Restore Data from EEPROM");
     logging(LOG_INFO,"Restore Data from EEPROM");
-    ReadAllDataFromEEPROM();
+    elementicLoadFactoryDefaults();
+    elementicLoadConfiguration();
     break;
   case FACTORYSETTINGS:
-    logging(LOG_INFO,"Factory settings: clear EEPROM and restart");
-    ClearEEPROMForFactorySettings();
+    logging(LOG_INFO,"Factory settings: restore compiled defaults");
+    if (!elementicFactoryReset()) {
+      logging(LOG_WARNING,"Factory settings: storage commit failed");
+      break;
+    }
     SendSystem(EEPROMBYTES, EEPROMStorage);
-    SerialCommand = 0;
+    SerialCommand = -1;
     RestartDevice();
     break;
   case CLEARERROR:
@@ -365,6 +407,6 @@ void ElementicLoop(){
     SendSystem(RAMBYTES, freeRam());
     SendSystem(UPTIME, millis()/1000);
   }
-  SerialCommand = 0;
+  SerialCommand = -1;
   DynamicVariablesUpdated = false;
   }

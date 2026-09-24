@@ -24,8 +24,12 @@ static uint32_t elementic_lastNetStatusMs = 0;
 #if ELEMENTIC_HAS_WIFI
   #if (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_ESP8266)
     #include <ESP8266WiFi.h>
+    extern "C" {
+      #include <user_interface.h>
+    }
   #elif (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_ESP32)
     #include <WiFi.h>
+    #include <esp_wifi.h>
   #elif (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_PICOW)
     #include <WiFi.h>
   #elif (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_OPTA)
@@ -103,15 +107,6 @@ static inline bool elementic_eth_has_valid_ip() {
   if (ip[0] == 0 || ip[0] == 255) return false;
 
   return true;
-}
-
-static inline void elementic_derive_mac_from_deviceid(uint16_t deviceId, uint8_t outMac[6]) {
-  outMac[0] = 0x02;
-  outMac[1] = 0xEC;
-  outMac[2] = 0x00;
-  outMac[3] = (uint8_t)((projectid >> 8) & 0xFF);
-  outMac[4] = (uint8_t)(projectid & 0xFF);
-  outMac[5] = 0x01;
 }
 
 static inline bool elementic_read_ip(const String& varName, IPAddress& out) {
@@ -200,6 +195,7 @@ static void elementic_update_network_variable_status() {
 
 #if ELEMENTIC_HAS_WIFI
 static void connectToWiFi() {
+  if (EthernetConnected) return;
   const String ssidStr = GetStringValue("SSID");
   const String passStr = GetPasswordValue("WIFI Password");
 
@@ -217,6 +213,29 @@ static void connectToWiFi() {
   delay(50);
   WiFi.mode(WIFI_STA);
   WiFi.persistent(false);
+
+  uint8_t mac[6];
+  if (!elementicApplySharedMac(false) || !elementicGetEffectiveMac(mac)) {
+    logging(LOG_WARNING, "WiFi MAC provisioning required");
+    return;
+  }
+  #if (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_ESP8266)
+    if (!wifi_set_macaddr(STATION_IF, mac)) {
+      elementicMacStatus = ELEMENTIC_MAC_ADAPTER_UNSUPPORTED;
+      logging(LOG_WARNING, "WiFi MAC rejected");
+      return;
+    }
+  #elif (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_ESP32)
+    if (esp_wifi_set_mac(WIFI_IF_STA, mac) != ESP_OK) {
+      elementicMacStatus = ELEMENTIC_MAC_ADAPTER_UNSUPPORTED;
+      logging(LOG_WARNING, "WiFi MAC rejected");
+      return;
+    }
+  #else
+    elementicMacStatus = ELEMENTIC_MAC_ADAPTER_UNSUPPORTED;
+    logging(LOG_WARNING, "WiFi MAC override unsupported");
+    return;
+  #endif
 
   #if defined(ESP8266) || defined(ESP32)
     WiFi.setAutoReconnect(true);
@@ -243,11 +262,22 @@ static void connectToWiFi() {
 #endif
 
 #if ELEMENTIC_HAS_ETHERNET
-static void connectToEthernet(uint16_t deviceId) {
+static void connectToEthernet() {
   elementic_prepare_ethernet_hardware();
 
   uint8_t mac[6];
-  elementic_derive_mac_from_deviceid(deviceId, mac);
+  if (!elementicApplySharedMac(false) || !elementicGetEffectiveMac(mac)) {
+    logging(LOG_WARNING, "ETH MAC provisioning required");
+    return;
+  }
+
+  #if ELEMENTIC_HAS_WIFI
+    if (WiFi.status() == WL_CONNECTED) {
+      WiFi.disconnect(true);
+      WiFi.mode(WIFI_OFF);
+      WIFIConnected = false;
+    }
+  #endif
 
   const bool dhcpEnabled = GetBoolValue("DHCP");
 
@@ -328,22 +358,24 @@ void connectNetwork() {
     return;
   }
 
-  #if ELEMENTIC_HAS_WIFI
-    connectToWiFi();
-    elementic_refreshNetworkFlags();
-  #endif
-
   #if ELEMENTIC_HAS_ETHERNET
-    if (!networkConnected) {
+    {
       const bool dhcpEnabled = GetBoolValue("DHCP");
 
       if (elementic_eth_should_try_in_setup(dhcpEnabled)) {
-        connectToEthernet(deviceId);
+        connectToEthernet();
       } else {
         g_ethDhcpDeferred = true;
         g_lastEthRetryMs = millis();
         logging(LOG_INFO, "ETH dhcp defer");
       }
+      elementic_refreshNetworkFlags();
+    }
+  #endif
+
+  #if ELEMENTIC_HAS_WIFI
+    if (!EthernetConnected) {
+      connectToWiFi();
       elementic_refreshNetworkFlags();
     }
   #endif
@@ -425,7 +457,7 @@ void networkCheckLoop() {
         }
         g_lastEthRetryMs = now;
         logging(LOG_INFO, "ETH dhcp retry");
-        connectToEthernet(deviceId);
+        connectToEthernet();
         elementic_refreshNetworkFlags();
         return;
       }
@@ -435,7 +467,7 @@ void networkCheckLoop() {
       }
       g_lastEthRetryMs = now;
       logging(LOG_CAUTION, "ETH retry");
-      connectToEthernet(deviceId);
+      connectToEthernet();
       elementic_refreshNetworkFlags();
     }
   #endif

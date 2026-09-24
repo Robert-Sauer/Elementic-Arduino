@@ -8,6 +8,8 @@ Elementic/
 *.log
 *.xlsx
 *.code-workspace
+__pycache__/
+*.py[cod]
 old Elementic from Github/
 externalInterfaceOperation - kopie.cpp
 Clone GitHub.cmd

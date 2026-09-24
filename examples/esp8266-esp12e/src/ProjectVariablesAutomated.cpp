@@ -11,6 +11,17 @@ const int device_type = 20; // NodeMCU v2/v3
 
 #include <Elementic.h>
 
+extern const uint16_t ELEMENTIC_METADATA_ABI = 1;
+extern const uint64_t ELEMENTIC_FIRMWARE_PROJECT_ID = UINT64_C(0);
+extern const uint32_t ELEMENTIC_PROJECT_REVISION = 0;
+extern const uint16_t ELEMENTIC_CONFIG_SCHEMA = 1;
+extern const uint32_t ELEMENTIC_TARGET_REVISION = 1;
+extern const char ELEMENTIC_TARGET_PROFILE[49] = "esp8266-esp12e";
+extern const char ELEMENTIC_MCU_FAMILY[17] = "esp8266";
+extern const char ELEMENTIC_APP_VERSION[32] = "0.0.0-local";
+extern const char ELEMENTIC_BUILD_ULID[27] = "";
+extern const char ELEMENTIC_RELEASE_ULID[27] = "";
+
 const long projectid = 4;
 
 const char MQTTName[] = "";
@@ -81,4 +92,14 @@ void outputsetupvariables() {
   OutputMaxValue[3] = 100;
   OutputDefaultValue[3] = 20;
   strncpy(MQTT_Output[3], "Test/External", sizeof(MQTT_Output[3]) - 1);
+}
+
+void elementicLoadFactoryDefaults() {
+  elementicResetConfigurationToEmpty();
+  setupNetwork();
+  genericsetupvariables();
+  MQTTSetupVariables();
+  outputsetupvariables();
+  inputsetupvariables();
+  elementicApplySharedMac(false);
 }

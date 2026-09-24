@@ -1,0 +1,82 @@
+{
+  "fixture_version": 1,
+  "provenance": {
+    "repository": "https://github.com/Robert-Sauer/Elementic-Arduino.git",
+    "captured_from": [
+      {
+        "name": "v1.0.0",
+        "commit": "42e6f53",
+        "library_version": "1.0.0"
+      },
+      {
+        "name": "main-before-cr-0004-stage-f",
+        "commit": "3f9999fd6103250482eba6a2fb436c1dd3a2c53f",
+        "library_version": "1.0.1"
+      }
+    ],
+    "note": "Source-derived fixtures. They are not physical EEPROM captures. Both referenced revisions contain the same wire/storage serialization code."
+  },
+  "wire_v1": [
+    {
+      "name": "released-ascii-version-full-sync",
+      "hex": "5330313131533032030900000300453032453031",
+      "version_byte": 49
+    },
+    {
+      "name": "released-headerless-incremental",
+      "hex": "53303153303200080100ff453032453031"
+    },
+    {
+      "name": "released-generic-int-device-to-app-big-endian",
+      "hex": "5330315330320200010102453032533032020201021234453032453031",
+      "decoded_value": 4660
+    },
+    {
+      "name": "released-generic-int-app-to-device-little-endian",
+      "hex": "533031533032020201003412453032453031",
+      "decoded_value": 4660
+    }
+  ],
+  "eeprom_v1": [
+    {
+      "name": "released-six-byte-system-record",
+      "hex": "0101030d00001300ffffff",
+      "record": {
+        "category": 3,
+        "field": 13,
+        "id": 0,
+        "length": 0,
+        "payload_hex": "1300",
+        "decoded_value": 19
+      }
+    },
+    {
+      "name": "released-output-pin-following-system-record",
+      "hex": "0101030a000001000000010007ffffff",
+      "records": [
+        {
+          "category": 3,
+          "field": 10,
+          "id": 0,
+          "length": 0,
+          "payload_hex": "0100",
+          "decoded_value": 1
+        },
+        {
+          "category": 0,
+          "field": 0,
+          "id": 1,
+          "length": 0,
+          "payload_hex": "07"
+        }
+      ]
+    }
+  ],
+  "unsupported_layouts": [
+    {
+      "name": "synthetic-four-byte-system-record",
+      "hex": "0101030d1300ffffff",
+      "reason": "No released revision or physical capture establishes this layout. It must not be auto-migrated."
+    }
+  ]
+}

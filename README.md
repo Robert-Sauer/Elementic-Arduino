@@ -4,11 +4,15 @@ Elementic is an Arduino library for PlatformIO projects. It provides a shared ru
 
 ## Supported Targets
 
-The current codebase is intended for:
+The current codebase compiles for these tested software environments:
 
 - Controllino / AVR boards with Ethernet
 - ESP8266, including ESP-12E
 - ESP32, including ESP32-C6
+
+An environment compile is not a hardware-support claim. Arduino Uno exceeds
+its flash/RAM limits, and the plain Pico still needs an approved storage/DMX
+profile. See the [Stage F hardware matrix](docs/CR-0004-stage-f-hardware-matrix.md).
 
 The library uses compile-time board detection in `deviceIdentification.h` to select WiFi and Ethernet support.
 
@@ -52,6 +56,13 @@ void loop() {
 
 Project-specific variables are usually placed in a separate `ProjectVariablesAutomated.cpp` file. This file provides values such as `projectid`, MQTT defaults, factory network settings, and input/output definitions.
 
+CR-0004 metadata uses the full-width `ELEMENTIC_FIRMWARE_PROJECT_ID`; legacy
+`projectid` remains a v1 hint only. Manual projects can copy the
+[metadata ABI adapter](extras/manual/ElementicBuildMetadata.cpp). The default
+wire producer is numeric v1. Select v2 independently with
+`-DELEMENTIC_WIRE_PROTOCOL_VERSION=2` only after compatible Android clients
+have been distributed.
+
 ## Examples
 
 This package includes examples for:
@@ -77,6 +88,7 @@ const char MQTTUsername[];
 const char MQTTPassword[];
 
 const uint8_t factorymac[6];
+const bool factoryDHCP;
 const uint8_t factoryip[4];
 const uint8_t factorygateway[4];
 const uint8_t factorysubnet[4];
@@ -87,7 +99,13 @@ const char factoryWIFIPassword[];
 void genericsetupvariables();
 void inputsetupvariables();
 void outputsetupvariables();
+void elementicLoadFactoryDefaults();
 ```
+
+Compiled defaults, including password literals, are deliberately retained for
+offline factory reset. Unit MAC provisioning is stored separately and survives
+that reset. The [EEPROM evidence](docs/CR-0004-stage-f-eeprom-evidence.md)
+records the exact legacy layout accepted by the bounded reader.
 
 ## License
 

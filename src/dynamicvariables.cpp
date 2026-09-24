@@ -26,6 +26,24 @@ int ipIndex       = 0;
 int passwordIndex = 0;
 int boolIndex     = 0;
 
+void ResetDynamicVariables() {
+    stringIndex = 0;
+    byteIndex = 0;
+    intIndex = 0;
+    ipIndex = 0;
+    passwordIndex = 0;
+    boolIndex = 0;
+    PriorityCounter = 1;
+    DynamicVariablesUpdated = false;
+    for (int i = 0; i < totalVariables; ++i) {
+        variables[i].name = "";
+        variables[i].priority = 0;
+        variables[i].type = DYNAMIC_STRING;
+        memset(&variables[i].value, 0, sizeof(variables[i].value));
+    }
+    memset(DynamicVariableStatus, 0, sizeof(DynamicVariableStatus));
+}
+
 // -------------------
 //   HELPER FUNCTIONS
 // -------------------
