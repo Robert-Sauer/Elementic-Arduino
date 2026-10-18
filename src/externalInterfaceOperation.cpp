@@ -62,6 +62,38 @@ static void elementic_mac_to_string(const uint8_t mac[6], char out[13]) {
            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
 
+#if ELEMENTIC_HAS_WIFI && (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_PICOW)
+static bool elementic_use_cyw43_hardware_mac(uint8_t mac[6]) {
+  if (WiFi.macAddress(mac) == 0) {
+    elementicMacStatus = ELEMENTIC_MAC_ADAPTER_UNSUPPORTED;
+    logging(LOG_WARNING, "WiFi hardware MAC unavailable");
+    return false;
+  }
+
+  char hardwareMac[13];
+  elementic_mac_to_string(mac, hardwareMac);
+  const int macIndex = findVariableIndexByName("Mac Address");
+  if (macIndex < 0 || variables[macIndex].type != DYNAMIC_STRING) {
+    elementicMacStatus = ELEMENTIC_MAC_PROVISIONING_REQUIRED;
+    logging(LOG_CAUTION, "MAC variable unavailable");
+    return false;
+  }
+
+  const bool configuredMacDiffers =
+      strcmp(variables[macIndex].value.strVal, hardwareMac) != 0;
+  if (!SetStringValue("Mac Address", hardwareMac) ||
+      !elementicApplySharedMac(false)) {
+    logging(LOG_WARNING, "WiFi hardware MAC rejected");
+    return false;
+  }
+
+  if (configuredMacDiffers) {
+    logging(LOG_CAUTION, "WiFi using hardware MAC");
+  }
+  return true;
+}
+#endif
+
 #if ELEMENTIC_HAS_WIFI
 static inline bool elementic_wifi_is_connected() {
   return (WiFi.status() == WL_CONNECTED);
@@ -215,10 +247,16 @@ static void connectToWiFi() {
   WiFi.persistent(false);
 
   uint8_t mac[6];
-  if (!elementicApplySharedMac(false) || !elementicGetEffectiveMac(mac)) {
-    logging(LOG_WARNING, "WiFi MAC provisioning required");
-    return;
-  }
+  #if (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_PICOW)
+    // Arduino-Pico exposes the CYW43 factory MAC but no supported setter.
+    // Keep the runtime variable aligned with the address actually used.
+    if (!elementic_use_cyw43_hardware_mac(mac)) return;
+  #else
+    if (!elementicApplySharedMac(false) || !elementicGetEffectiveMac(mac)) {
+      logging(LOG_WARNING, "WiFi MAC provisioning required");
+      return;
+    }
+  #endif
   #if (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_ESP8266)
     if (!wifi_set_macaddr(STATION_IF, mac)) {
       elementicMacStatus = ELEMENTIC_MAC_ADAPTER_UNSUPPORTED;
@@ -231,6 +269,8 @@ static void connectToWiFi() {
       logging(LOG_WARNING, "WiFi MAC rejected");
       return;
     }
+  #elif (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_PICOW)
+    // The CYW43 driver already uses its factory MAC.
   #else
     elementicMacStatus = ELEMENTIC_MAC_ADAPTER_UNSUPPORTED;
     logging(LOG_WARNING, "WiFi MAC override unsupported");
@@ -245,11 +285,12 @@ static void connectToWiFi() {
     WiFi.setSleepMode(WIFI_NONE_SLEEP);
   #endif
 
-  if (MQTTName && MQTTName[0]) {
+  const String mqttName = GetStringValue("MQTTName");
+  if (mqttName.length() > 0) {
     #if defined(ESP8266)
-      WiFi.hostname(MQTTName);
-    #elif defined(ESP32)
-      WiFi.setHostname(MQTTName);
+      WiFi.hostname(mqttName.c_str());
+    #elif defined(ESP32) || (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_PICOW)
+      WiFi.setHostname(mqttName.c_str());
     #endif
   }
 
@@ -302,7 +343,7 @@ static void connectToEthernet() {
       return;      
     }
     if (result != 0){
-      logging(LOG_WARNING, "ETH dhcp successfull");
+      logging(LOG_INFO, "ETH DHCP successful");
 
     }
   } else {
@@ -329,20 +370,22 @@ static void connectToEthernet() {
 #endif
 
 void setupNetwork() {
-  #if ELEMENTIC_HAS_NETWORK
-    char macAddress[13];
-    elementic_mac_to_string(factorymac, macAddress);
-    DefineString("Mac Address", macAddress, PriorityCounter++);
-    DefineBool("DHCP", factoryDHCP, PriorityCounter++);
-    DefineIP("IP Address", factoryip[0], factoryip[1], factoryip[2], factoryip[3], PriorityCounter++);
-    DefineIP("Gateway",   factorygateway[0], factorygateway[1], factorygateway[2], factorygateway[3], PriorityCounter++);
-    DefineIP("Subnet",    factorysubnet[0], factorysubnet[1], factorysubnet[2], factorysubnet[3], PriorityCounter++);
-    DefineString("Hostname", factoryhostname, PriorityCounter++);
-  #endif
+  #if ELEMENTIC_PROJECT_VARIABLES_VERSION < 2
+    #if ELEMENTIC_HAS_NETWORK
+      char macAddress[13];
+      elementic_mac_to_string(factorymac, macAddress);
+      DefineString("Mac Address", macAddress, PriorityCounter++);
+      DefineBool("DHCP", factoryDHCP, PriorityCounter++);
+      DefineIP("IP Address", factoryip[0], factoryip[1], factoryip[2], factoryip[3], PriorityCounter++);
+      DefineIP("Gateway",   factorygateway[0], factorygateway[1], factorygateway[2], factorygateway[3], PriorityCounter++);
+      DefineIP("Subnet",    factorysubnet[0], factorysubnet[1], factorysubnet[2], factorysubnet[3], PriorityCounter++);
+      DefineString("Hostname", factoryhostname, PriorityCounter++);
+    #endif
 
-  #if ELEMENTIC_HAS_WIFI
-    DefineString("SSID", factorySSID, PriorityCounter++);
-    DefinePassword("WIFI Password", factoryWIFIPassword, PriorityCounter++);
+    #if ELEMENTIC_HAS_WIFI
+      DefineString("SSID", factorySSID, PriorityCounter++);
+      DefinePassword("WIFI Password", factoryWIFIPassword, PriorityCounter++);
+    #endif
   #endif
 
   elementic_refreshNetworkFlags();
@@ -358,7 +401,7 @@ void connectNetwork() {
     return;
   }
 
-  #if ELEMENTIC_HAS_ETHERNET
+  #if ELEMENTIC_USE_ETHERNET
     {
       const bool dhcpEnabled = GetBoolValue("DHCP");
 
@@ -373,7 +416,7 @@ void connectNetwork() {
     }
   #endif
 
-  #if ELEMENTIC_HAS_WIFI
+  #if ELEMENTIC_USE_WIFI
     if (!EthernetConnected) {
       connectToWiFi();
       elementic_refreshNetworkFlags();
@@ -386,17 +429,17 @@ void connectNetwork() {
 void networkCheckLoop() {
   static uint32_t lastNetCheckMs = 0;
 
-  #if ELEMENTIC_HAS_ETHERNET
+  #if ELEMENTIC_USE_ETHERNET
     static bool dhcpInitialized = false;
     static bool lastDhcpEnabled = false;
   #endif
 
-  #if ELEMENTIC_HAS_NETWORK
+  #if ELEMENTIC_USE_NETWORK
     if (DynamicVariablesUpdated) {
       DynamicVariablesUpdated = false;
       elementic_update_network_variable_status();
 
-      #if ELEMENTIC_HAS_ETHERNET
+      #if ELEMENTIC_USE_ETHERNET
         const bool dhcpEnabled = GetBoolValue("DHCP");
         if (!dhcpInitialized) {
           dhcpInitialized = true;
@@ -420,7 +463,7 @@ void networkCheckLoop() {
   const uint16_t deviceId = elementic_getDeviceId();
   if (deviceId == 0) return;
 
-  #if ELEMENTIC_HAS_ETHERNET
+  #if ELEMENTIC_USE_ETHERNET
     const bool dhcpEnabled = GetBoolValue("DHCP");
 
     if (!dhcpInitialized) {
@@ -429,7 +472,7 @@ void networkCheckLoop() {
     }
   #endif
 
-  #if ELEMENTIC_HAS_WIFI
+  #if ELEMENTIC_USE_WIFI
     if (!WIFIConnected) {
       if (!g_wifiBeginStarted || (uint32_t)(now - g_lastWiFiRetryMs) >= 10000UL) {
         g_lastWiFiRetryMs = now;
@@ -440,7 +483,7 @@ void networkCheckLoop() {
     }
   #endif
 
-  #if ELEMENTIC_HAS_ETHERNET
+  #if ELEMENTIC_USE_ETHERNET
     if (!EthernetConnected) {
       // W5500/W5200: safe to check cable state first.
       if (elementic_eth_has_link_api() && !elementic_eth_link_is_on()) {

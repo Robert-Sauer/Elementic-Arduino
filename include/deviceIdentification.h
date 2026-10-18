@@ -44,7 +44,9 @@
 // RP2040 Pico W / Pico 2W. Do not treat all RP2040 boards as WiFi boards:
 // Wiznet RP2040 boards use Ethernet instead.
 #elif defined(ARDUINO_ARCH_RP2040) && \
-      (defined(ARDUINO_RASPBERRY_PI_PICO_W) || defined(ARDUINO_NANO_RP2040_CONNECT))
+      (defined(ARDUINO_RASPBERRY_PI_PICO_W) || \
+       defined(ARDUINO_RASPBERRY_PI_PICO_2W) || \
+       defined(ARDUINO_NANO_RP2040_CONNECT))
   #define ELEMENTIC_HAS_WIFI 1
   #define ELEMENTIC_WIFI_DRIVER ELEMENTIC_WIFI_DRIVER_PICOW
 
@@ -84,8 +86,9 @@
   #define ELEMENTIC_ETH_DRIVER   ELEMENTIC_ETH_DRIVER_TEENSY
 #endif
 
-// Wiznet W5100S-EVB-Pico
-#if defined(ARDUINO_WIZNET_5100S_EVB_PICO)
+// Wiznet W5100S/W5500 EVB Pico and Pico 2 variants.
+#if defined(ARDUINO_WIZNET_5100S_EVB_PICO) || defined(ARDUINO_WIZNET_5100S_EVB_PICO2) || \
+    defined(ARDUINO_WIZNET_5500_EVB_PICO) || defined(ARDUINO_WIZNET_5500_EVB_PICO2)
   #undef  ELEMENTIC_HAS_ETHERNET
   #undef  ELEMENTIC_ETH_DRIVER
   #define ELEMENTIC_HAS_ETHERNET 1

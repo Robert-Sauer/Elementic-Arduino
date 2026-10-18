@@ -2,6 +2,16 @@
  * serial.cpp
  *
  * Implements the Elementic serial protocol, including framing, EEPROM serialization, variable synchronization, and command handling.
+ *
+ * File layout:
+ *   1. Shared protocol helpers
+ *   2. Protocol V2 implementation
+ *   3. Protocol V1 (legacy) validation
+ *   4. Shared public API and protocol-version dispatch
+ *   5. Protocol V1 (legacy) snapshot / EEPROM serialization
+ *   6. Shared EEPROM restore
+ *   7. Runtime events with protocol-version dispatch
+ *   8. Shared incoming-frame dispatch
  */
 
 #include <Arduino.h>
@@ -10,6 +20,28 @@
 #define MAX_SERIAL_BUFFER 500
 
 namespace {
+
+// =============================================================================
+// Shared protocol helpers
+// =============================================================================
+
+uint16_t boundedTextLength(const char* value, uint16_t maximum) {
+    if (value == 0) return 0U;
+    return static_cast<uint16_t>(strnlen(value, maximum));
+}
+
+// REQ01 and this compact announcement are shared discovery mechanisms. The
+// announced byte tells Android whether subsequent traffic uses V1 or V2.
+void sendProtocolAnnouncement() {
+    Serial.write(reinterpret_cast<const uint8_t*>("S011"), 4U);
+    Serial.write(static_cast<uint8_t>(ELEMENTIC_WIRE_PROTOCOL_VERSION));
+    Serial.write(reinterpret_cast<const uint8_t*>("E01"), 3U);
+}
+
+// =============================================================================
+// Protocol V2
+// Binary framed messages, TLV records, snapshots, writes and commands.
+// =============================================================================
 
 void putU16Le(uint8_t* destination, uint16_t value) {
     destination[0] = static_cast<uint8_t>(value);
@@ -27,12 +59,6 @@ void putU64Le(uint8_t* destination, uint64_t value) {
 uint16_t getU16Le(const uint8_t* source) {
     return static_cast<uint16_t>(source[0]) |
            static_cast<uint16_t>(static_cast<uint16_t>(source[1]) << 8);
-}
-
-void sendProtocolAnnouncement() {
-    Serial.write(reinterpret_cast<const uint8_t*>("S011"), 4U);
-    Serial.write(static_cast<uint8_t>(ELEMENTIC_WIRE_PROTOCOL_VERSION));
-    Serial.write(reinterpret_cast<const uint8_t*>("E01"), 3U);
 }
 
 bool sendV2Frame(uint8_t kind, uint16_t sequence, const uint8_t* payload,
@@ -59,11 +85,6 @@ bool sendV2Tlv(uint8_t kind, uint16_t sequence, uint8_t category,
     return sendV2Frame(kind, sequence, payload, static_cast<uint16_t>(length + 6U));
 }
 
-uint16_t boundedTextLength(const char* value, uint16_t maximum) {
-    if (value == 0) return 0U;
-    return static_cast<uint16_t>(strnlen(value, maximum));
-}
-
 void sendV2End(uint16_t sequence, uint32_t capture, uint32_t generation,
                uint16_t records) {
     uint8_t payload[10];
@@ -83,6 +104,15 @@ void sendV2Info(uint16_t sequence) {
         sendBytes(field, reinterpret_cast<const uint8_t*>(text), boundedTextLength(text, maximum));
     };
     putU16Le(value, ELEMENTIC_DEVICEID); sendBytes(9U, value, 2U);
+    // INFO is also the late-attachment state baseline. Runtime events may have
+    // been emitted before Android opened USB, so report the current states
+    // again as their existing system fields.
+    putU16Le(value, 1U); sendBytes(static_cast<uint8_t>(IDLE), value, 2U);
+    putU16Le(value, 0U); sendBytes(static_cast<uint8_t>(BOOTING), value, 2U);
+    putU16Le(value, networkConnected ? 1U : 0U);
+    sendBytes(static_cast<uint8_t>(ETHERNET), value, 2U);
+    putU16Le(value, mqttClient.connected() ? 1U : 0U);
+    sendBytes(static_cast<uint8_t>(MQTT), value, 2U);
     value[0] = 2U; sendBytes(0x20U, value, 1U);
     sendText(0x21U, ELEMENTIC_LIBRARY_VERSION, 31U);
     sendText(0x22U, ELEMENTIC_APP_VERSION, 31U);
@@ -97,11 +127,15 @@ void sendV2Info(uint16_t sequence) {
     putU16Le(value, OutputChannels);
     putU16Le(value + 2U, InputChannels);
     putU16Le(value + 4U, totalVariables);
-    putU16Le(value + 6U, MAXNAMELENGTH - 1U);
-    putU16Le(value + 8U, MAXTOPICLENGTH - 1U);
+    putU16Le(value + 6U, min(ELEMENTIC_INPUT_NAME_MAX_BYTES, ELEMENTIC_OUTPUT_NAME_MAX_BYTES));
+    putU16Le(value + 8U, min(ELEMENTIC_INPUT_TOPIC_MAX_BYTES, ELEMENTIC_OUTPUT_TOPIC_MAX_BYTES));
     putU16Le(value + 10U, MAX_STRING_LENGTH - 1U);
     value[12] = INOUT_MATRIX_COLS;
     sendBytes(0x2CU, value, 13U);
+    putU16Le(value, ELEMENTIC_OUTPUT_NAME_MAX_BYTES); sendBytes(0x13U, value, 2U);
+    putU16Le(value, ELEMENTIC_OUTPUT_TOPIC_MAX_BYTES); sendBytes(0x14U, value, 2U);
+    putU16Le(value, ELEMENTIC_INPUT_NAME_MAX_BYTES); sendBytes(0x15U, value, 2U);
+    putU16Le(value, ELEMENTIC_INPUT_TOPIC_MAX_BYTES); sendBytes(0x16U, value, 2U);
     value[0] = static_cast<uint8_t>(elementicMacStatus); sendBytes(0x2DU, value, 1U);
     value[0] = static_cast<uint8_t>(elementicStorageStatus); sendBytes(0x2EU, value, 1U);
     if (ELEMENTIC_RELEASE_ULID[0] != '\0') sendText(0x2FU, ELEMENTIC_RELEASE_ULID, 26U);
@@ -180,8 +214,8 @@ void sendV2Snapshot(uint16_t sequence, uint8_t source) {
         bytes[0] = OutputMinValue[item]; send(0, 3, item, bytes, 1);
         bytes[0] = OutputMaxValue[item]; send(0, 4, item, bytes, 1);
         bytes[0] = OutputDefaultValue[item]; send(0, 5, item, bytes, 1);
-        send(0, 6, item, reinterpret_cast<const uint8_t*>(Output_Name[item]), boundedTextLength(Output_Name[item], MAXNAMELENGTH));
-        send(0, 7, item, reinterpret_cast<const uint8_t*>(MQTT_Output[item]), boundedTextLength(MQTT_Output[item], MAXTOPICLENGTH));
+        send(0, 6, item, reinterpret_cast<const uint8_t*>(Output_Name[item]), boundedTextLength(Output_Name[item], ELEMENTIC_OUTPUT_NAME_CAPACITY));
+        send(0, 7, item, reinterpret_cast<const uint8_t*>(MQTT_Output[item]), boundedTextLength(MQTT_Output[item], ELEMENTIC_OUTPUT_TOPIC_CAPACITY));
         bytes[0] = OutputValueActual[item]; send(0, 8, item, bytes, 1);
         bytes[0] = OutputStatus[item]; send(0, 9, item, bytes, 1);
         putU16Le(bytes, OutputChannel[item]); send(0, 10, item, bytes, 2);
@@ -191,9 +225,9 @@ void sendV2Snapshot(uint16_t sequence, uint8_t source) {
         const uint8_t links = min(InOutMatrixCouter[item], static_cast<uint8_t>(INOUT_MATRIX_COLS));
         for (uint8_t i = 0; i < links; ++i) putU16Le(bytes + i * 2U, InOutMatrix[item][i]);
         send(1, 1, item, bytes, links * 2U);
-        send(1, 2, item, reinterpret_cast<const uint8_t*>(MQTT_Input[item]), boundedTextLength(MQTT_Input[item], MAXTOPICLENGTH));
+        send(1, 2, item, reinterpret_cast<const uint8_t*>(MQTT_Input[item]), boundedTextLength(MQTT_Input[item], ELEMENTIC_INPUT_TOPIC_CAPACITY));
         bytes[0] = 1U; send(1, 3, item, bytes, 1);
-        send(1, 5, item, reinterpret_cast<const uint8_t*>(Input_Name[item]), boundedTextLength(Input_Name[item], MAXNAMELENGTH));
+        send(1, 5, item, reinterpret_cast<const uint8_t*>(Input_Name[item]), boundedTextLength(Input_Name[item], ELEMENTIC_INPUT_NAME_CAPACITY));
         bytes[0] = InputStatus[item]; send(1, 6, item, bytes, 1);
     }
     for (int priority = 1; priority < PriorityCounter; ++priority) {
@@ -266,8 +300,8 @@ bool parseV2Write(const elementic::V2FrameView& frame, V2Write& write) {
         if (write.field == 0U || write.field == 2U || write.field == 10U) return write.length == 2U && getU16Le(write.value) <= 255U;
         if (write.field == 1U) return write.length == 1U && write.value[0] >= 1U && write.value[0] <= 7U;
         if (write.field >= 3U && write.field <= 5U) return write.length == 1U;
-        if (write.field == 6U) return write.length <= 63U && write.length < MAXNAMELENGTH && validUtf8NoNul(write.value, write.length);
-        if (write.field == 7U) return write.length <= 127U && write.length < MAXTOPICLENGTH && validUtf8NoNul(write.value, write.length);
+        if (write.field == 6U) return write.length <= ELEMENTIC_OUTPUT_NAME_MAX_BYTES && validUtf8NoNul(write.value, write.length);
+        if (write.field == 7U) return write.length <= ELEMENTIC_OUTPUT_TOPIC_MAX_BYTES && validUtf8NoNul(write.value, write.length);
         if (write.field == 8U) return write.length == 1U;
         return false;
     }
@@ -282,9 +316,10 @@ bool parseV2Write(const elementic::V2FrameView& frame, V2Write& write) {
             }
             return true;
         }
-        if (write.field == 2U) return write.length <= 127U && write.length < MAXTOPICLENGTH && validUtf8NoNul(write.value, write.length);
+        if (write.field == 2U) return write.length <= ELEMENTIC_INPUT_TOPIC_MAX_BYTES && validUtf8NoNul(write.value, write.length);
         if (write.field == 3U) return write.length == 1U && write.value[0] == 1U;
-        if (write.field == 5U) return write.length <= 63U && write.length < MAXNAMELENGTH && validUtf8NoNul(write.value, write.length);
+        if (write.field == 4U) return write.length == 2U;
+        if (write.field == 5U) return write.length <= ELEMENTIC_INPUT_NAME_MAX_BYTES && validUtf8NoNul(write.value, write.length);
         return false;
     }
     if (write.category == 2U) {
@@ -333,6 +368,12 @@ uint8_t applyV2Write(const V2Write& write) {
             InOutMatrixCouter[write.item] = static_cast<uint8_t>(write.length / 2U);
             for (uint8_t i = 0; i < InOutMatrixCouter[write.item]; ++i) InOutMatrix[write.item][i] = static_cast<uint8_t>(getU16Le(write.value + i * 2U));
         } else if (write.field == 2U) { memcpy(MQTT_Input[write.item], write.value, write.length); MQTT_Input[write.item][write.length] = '\0'; }
+        else if (write.field == 4U) {
+            const int16_t liveValue = static_cast<int16_t>(getU16Le(write.value));
+            if (liveValue == 0) SwitchPressedExternal[write.item] = false;
+            else if (liveValue == 1) SwitchPressedExternal[write.item] = true;
+            return 0U;
+        }
         else if (write.field == 5U) { memcpy(Input_Name[write.item], write.value, write.length); Input_Name[write.item][write.length] = '\0'; }
     } else if (write.category == 2U) {
         const int index = findVariableIndexByPriority(write.item);
@@ -426,6 +467,11 @@ void processV2Frame(const uint8_t* frame, size_t frameLength) {
     }
 }
 
+// =============================================================================
+// Protocol V1 (legacy)
+// Validation for the historical S01 / S02 / E02 / E01 byte stream.
+// =============================================================================
+
 bool containsLegacyMarker(const uint8_t* value, uint16_t length) {
     static const char* markers[] = {"S01", "S02", "E01", "E02", "REQ01"};
     for (uint8_t marker = 0; marker < 5U; ++marker) {
@@ -454,15 +500,15 @@ bool validateV1Command(const uint8_t* frame, size_t length) {
         bool text = false;
         if (category == 0U) {
             if (item == 0U || item > OutputChannels || field > 8U) return false;
-            if (field == 6U) { width = declared; text = true; if (width >= MAXNAMELENGTH) return false; }
-            else if (field == 7U) { width = declared; text = true; if (width >= MAXTOPICLENGTH) return false; }
+            if (field == 6U) { width = declared; text = true; if (width > ELEMENTIC_OUTPUT_NAME_MAX_BYTES) return false; }
+            else if (field == 7U) { width = declared; text = true; if (width > ELEMENTIC_OUTPUT_TOPIC_MAX_BYTES) return false; }
             else width = 1U;
         } else if (category == 1U) {
             if (item == 0U || item > InputChannels ||
                 !(field == 0U || field == 1U || field == 2U || field == 5U)) return false;
             if (field == 0U) width = 1U;
             else if (field == 1U) { width = declared; if (width > INOUT_MATRIX_COLS) return false; }
-            else { width = declared; text = true; if ((field == 2U && width >= MAXTOPICLENGTH) || (field == 5U && width >= MAXNAMELENGTH)) return false; }
+            else { width = declared; text = true; if ((field == 2U && width > ELEMENTIC_INPUT_TOPIC_MAX_BYTES) || (field == 5U && width > ELEMENTIC_INPUT_NAME_MAX_BYTES)) return false; }
         } else if (category == 2U) {
             if (field != 2U) return false;
             const int index = findVariableIndexByPriority(item);
@@ -488,6 +534,10 @@ bool validateV1Command(const uint8_t* frame, size_t length) {
 }
 
 }  // namespace
+
+// =============================================================================
+// Shared public serial API
+// =============================================================================
 
 template <typename Func>
 void ProcessVariablesByPriority(Func func) {
@@ -520,6 +570,53 @@ void serialPrintLimited(const char* data) {
     }
     Serial.print(data);
     databufferposition += dataLen;
+}
+
+// Sends the same diagnostic event through the selected wire protocol.
+void sendSerialLog(LogLevel level, const char* text) {
+    if (text == 0) return;
+    const uint16_t length = boundedTextLength(text, 49U);
+
+    #if ELEMENTIC_WIRE_PROTOCOL_VERSION == 2
+      // Protocol V2
+      // Runtime diagnostics are unsolicited v2 EVENTs. Sequence zero is
+      // reserved for events; the category-4 field retains the LOG/CAU/WAR
+      // severity used by the historical protocol.
+      sendV2Tlv(0x13U, 0U, 4U, static_cast<uint8_t>(level), 0U,
+                reinterpret_cast<const uint8_t*>(text), length);
+    #else
+      // Protocol V1 (legacy)
+      Serial.print("S01");
+      Serial.print("S02");
+      serialwrite(4U);
+      serialwrite(static_cast<uint8_t>(level));
+      serialwrite(0U);
+      serialwrite(static_cast<uint8_t>(length));
+      for (uint16_t i = 0; i < length; ++i) serialwrite(static_cast<uint8_t>(text[i]));
+      Serial.print("E02");
+      Serial.print("E01");
+    #endif
+}
+
+// =============================================================================
+// Protocol V1 (legacy) snapshot and EEPROM serialization
+//
+// The ER path preserves the historical EEPROM record layout. The SD path
+// emits those same records using the legacy S01 / S02 / E02 / E01 framing.
+// =============================================================================
+
+void SendSystemInBatch(SystemType systemTypeVal, int value) {
+    // Serial.print("S01"); // Initiate
+    Serial.print("S02"); // Marker
+    serialwrite(3); // Type01: 3 = System
+    serialwrite((byte)systemTypeVal); // type02: VARIABLE
+    serialwrite(0); // id not required
+    serialwrite(0); // length not required
+    // Write 2-byte value
+    serialwrite((byte)(value & 0xFF));   // low byte first
+    serialwrite((byte)(value >> 8));     // high byte second
+    Serial.print("E02");
+    // Serial.print("E01");
 }
 
 int DynamicVariableActions(int EP, bool ER, bool SD, bool MEM, DynamicVariable &var,int varId) {
@@ -644,8 +741,8 @@ int DynamicVariableActions(int EP, bool ER, bool SD, bool MEM, DynamicVariable &
 }
 
 void SendAllData(bool ER, bool SD, bool MEM) { // ER = store to EEPROM, SD = send via Serial, MEM = reserved for MEM
-    if (SD) { snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/LOG"); }
-    if (ER) { snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/LOG"); }
+    if (SD) { snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", GetStringValue("MQTTName").c_str(), "/LOG"); }
+    if (ER) { snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", GetStringValue("MQTTName").c_str(), "/LOG"); }
     int EP = 0; // EEPROM pointer
 
     if (SD) { serialPrintLimited("S01"); } // Initiate frame
@@ -702,8 +799,12 @@ void SendAllData(bool ER, bool SD, bool MEM) { // ER = store to EEPROM, SD = sen
     //     SendSystemInBatch(MAXOUTPUTS, (int)OutputChannels);
     // }
     SendSystemInBatch(DEVICETYPE, ELEMENTIC_DEVICEID);
-    SendSystemInBatch(MAXCHARNAME, (int)MAXNAMELENGTH);
-    SendSystemInBatch(MAXCHARTOPIC, (int)MAXTOPICLENGTH);
+    SendSystemInBatch(MAXCHARNAME, (int)min(ELEMENTIC_INPUT_NAME_MAX_BYTES, ELEMENTIC_OUTPUT_NAME_MAX_BYTES));
+    SendSystemInBatch(MAXCHARTOPIC, (int)min(ELEMENTIC_INPUT_TOPIC_MAX_BYTES, ELEMENTIC_OUTPUT_TOPIC_MAX_BYTES));
+    SendSystemInBatch(MAXOUTPUTNAME, (int)ELEMENTIC_OUTPUT_NAME_MAX_BYTES);
+    SendSystemInBatch(MAXOUTPUTTOPIC, (int)ELEMENTIC_OUTPUT_TOPIC_MAX_BYTES);
+    SendSystemInBatch(MAXINPUTNAME, (int)ELEMENTIC_INPUT_NAME_MAX_BYTES);
+    SendSystemInBatch(MAXINPUTTOPIC, (int)ELEMENTIC_INPUT_TOPIC_MAX_BYTES);
 
     // Process inputs
     for (byte i = 1; i <= SwitchCounter; i++) {
@@ -890,8 +991,8 @@ void SendAllData(bool ER, bool SD, bool MEM) { // ER = store to EEPROM, SD = sen
         EEPROM.write(EP++, 0xFF); // Write a final end marker
         EEPROM.write(EP++, 0xFF); // Write a final end marker
         EEPROM.write(EP++, 0xFF); // Write a final end marker
-        #if defined(ESP32) || defined(ESP8266)
-            EEPROM.commit();       // Only needed on ESP platforms
+        #if defined(ESP32) || defined(ESP8266) || defined(ARDUINO_ARCH_RP2040)
+            EEPROM.commit();       // Flash-backed EEPROM emulation
         #endif
     }
 
@@ -899,6 +1000,10 @@ void SendAllData(bool ER, bool SD, bool MEM) { // ER = store to EEPROM, SD = sen
 
     if (SD) { serialPrintLimited("E01"); }
 }
+
+// =============================================================================
+// Shared receive-buffer and EEPROM restore code
+// =============================================================================
 
 void clearIncomingData() {
     memset(incomingdata, 0, sizeof(incomingdata));
@@ -910,7 +1015,7 @@ void ReadAllDataFromEEPROM() {
     int EP = 0; // EEPROM pointer
     byte type, type01, type02, id, length, version;
 
-    snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/LOG");
+    snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", GetStringValue("MQTTName").c_str(), "/LOG");
     // mqttClient.publish(msgmqtt, "Reading data from EEPROM...");
     logging(LOG_INFO,"Reading data from EEPROM. . .");
 
@@ -1076,27 +1181,25 @@ void ReadAllDataFromEEPROM() {
                         break;
                     }
                     case 2: { // Topic
-                        char inputTopicBuf[50];
-                        memset(inputTopicBuf, 0, sizeof(inputTopicBuf));
-                        for (i2 = 0; i2 < length && i2 < sizeof(inputTopicBuf)-1; i2++) {
-                            inputTopicBuf[i2] = (char)EEPROM.read(EP++);
+                        size_t copied = 0U;
+                        for (i2 = 0; i2 < length; i2++) {
+                            const char stored = (char)EEPROM.read(EP++);
+                            if (copied < ELEMENTIC_INPUT_TOPIC_MAX_BYTES) MQTT_Input[id][copied++] = stored;
                         }
-                        inputTopicBuf[i2] = '\0';
-                        strcpy(MQTT_Input[id], inputTopicBuf);
-                        sprintf(debugBuf, "Input Topic[%d] = %s", id, inputTopicBuf);
+                        MQTT_Input[id][copied] = '\0';
+                        sprintf(debugBuf, "Input Topic[%d] = %s", id, MQTT_Input[id]);
                         logging(LOG_INFO,debugBuf);
                         break;
                     }
 
                     case 5: { // Name
-                        char inputTopicBuf[50];
-                        memset(inputTopicBuf, 0, sizeof(inputTopicBuf));
-                        for (i2 = 0; i2 < length && i2 < sizeof(inputTopicBuf)-1; i2++) {
-                            inputTopicBuf[i2] = (char)EEPROM.read(EP++);
+                        size_t copied = 0U;
+                        for (i2 = 0; i2 < length; i2++) {
+                            const char stored = (char)EEPROM.read(EP++);
+                            if (copied < ELEMENTIC_INPUT_NAME_MAX_BYTES) Input_Name[id][copied++] = stored;
                         }
-                        inputTopicBuf[i2] = '\0';
-                        strcpy(Input_Name[id], inputTopicBuf);
-                        sprintf(debugBuf, "Input Topic[%d] = %s", id, inputTopicBuf);
+                        Input_Name[id][copied] = '\0';
+                        sprintf(debugBuf, "Input Name[%d] = %s", id, Input_Name[id]);
                         logging(LOG_INFO,debugBuf);
                         break;
                     }
@@ -1262,7 +1365,17 @@ void ReadAllDataFromEEPROM() {
     logging(LOG_INFO,"End Reading data from EEPROM. . .");
 }
 
+// =============================================================================
+// Runtime events with protocol-version dispatch
+// =============================================================================
+
 void SendOutputValueSerial(byte id, byte value) {
+    #if ELEMENTIC_WIRE_PROTOCOL_VERSION == 2
+      // Protocol V2
+      sendV2Tlv(0x13U, 0U, 0U, 8U, id, &value, 1U);
+      return;
+    #endif
+    // Protocol V1 (legacy)
     Serial.print("S01"); // Initiate
     Serial.print("S02"); // Marker
     serialwrite(0); // Type01: 0 = Output
@@ -1276,6 +1389,17 @@ void SendOutputValueSerial(byte id, byte value) {
 }
 
 void SendSystem(SystemType systemTypeVal, int value) {
+    #if ELEMENTIC_WIRE_PROTOCOL_VERSION == 2
+      // Protocol V2
+      // V2 reports the full 64-bit firmware Project ID through INFO field 0x23.
+      // Never emit the historical truncated field 18 in runtime events.
+      if (systemTypeVal == PROJECTID) return;
+      uint8_t bytes[2];
+      putU16Le(bytes, static_cast<uint16_t>(value));
+      sendV2Tlv(0x13U, 0U, 3U, static_cast<uint8_t>(systemTypeVal), 0U, bytes, sizeof(bytes));
+      return;
+    #endif
+    // Protocol V1 (legacy)
     Serial.print("S01"); // Initiate
     Serial.print("S02"); // Marker
     serialwrite(3); // Type01: 3 = System
@@ -1313,6 +1437,14 @@ void SendStatus(byte type1, byte protocolId, byte statusValue) {
             return;
     }
 
+    #if ELEMENTIC_WIRE_PROTOCOL_VERSION == 2
+      // Protocol V2
+      sendV2Tlv(0x13U, 0U, protocolType01, protocolType02, protocolId,
+                &statusValue, 1U);
+      return;
+    #endif
+
+    // Protocol V1 (legacy)
     Serial.print("S01");
     Serial.print("S02");
     serialwrite(protocolType01);
@@ -1324,23 +1456,12 @@ void SendStatus(byte type1, byte protocolId, byte statusValue) {
     Serial.print("E01");
 }
 
-void SendSystemInBatch(SystemType systemTypeVal, int value) {
-    // Serial.print("S01"); // Initiate
-    Serial.print("S02"); // Marker
-    serialwrite(3); // Type01: 3 = System
-    serialwrite((byte)systemTypeVal); // type02: VARIABLE
-    serialwrite(0); // id not required
-    serialwrite(0); // length not required
-    // Write 2-byte value
-    serialwrite((byte)(value & 0xFF));   // low byte first
-    serialwrite((byte)(value >> 8));     // high byte second
-    Serial.print("E02");
-    // Serial.print("E01");
-}
+// =============================================================================
+// Shared receive loop and protocol dispatch
+// =============================================================================
 
-// ---------------- Restored from original library (needed for linking) ----------------
 void serialloop() {
-    // 1) Read incoming bytes from Serial
+    // Shared transport: collect incoming serial bytes.
     while (Serial.available() > 0) {
         incomingByte = Serial.read();
         uint8_t byteValue = (uint8_t)incomingByte;
@@ -1353,12 +1474,11 @@ void serialloop() {
         }
     }
 
-    // Need at least 5 bytes to check for "REQ01"
+    // Shared discovery: wait for and handle REQ01.
     if (data_index < 5) {
         return;
     }
 
-    // 2) Check for "REQ01" in the buffer
     for (int i = 0; i <= data_index - 5; i++) {
         if (incomingdata[i]     == 'R' &&
             incomingdata[i + 1] == 'E' &&
@@ -1374,7 +1494,7 @@ void serialloop() {
         }
     }
 
-    // 3) Look for a complete "S01 ... E01" block.
+    // Shared outer envelope: locate one complete S01 ... E01 block.
     int startPos = -1;
     int endPos = -1;
     for (int i = 0; i <= data_index - 3; i++) {
@@ -1393,6 +1513,8 @@ void serialloop() {
     if (endPos == -1) return;
 
     const size_t completeFrameLength = static_cast<size_t>(endPos + 3 - startPos);
+
+    // Protocol V2: binary framed message inside the shared outer envelope.
     if (completeFrameLength >= 8U && incomingdata[startPos + 3] == '1' &&
         incomingdata[startPos + 4] == elementic::WIRE_V2) {
         #if ELEMENTIC_WIRE_PROTOCOL_VERSION == 2
@@ -1407,13 +1529,14 @@ void serialloop() {
       return;
     #endif
 
+    // Protocol V1 (legacy): validate and parse S02 records.
     if (!validateV1Command(incomingdata + startPos, completeFrameLength)) {
         logging(LOG_CAUTION, "Rejected malformed serial command");
         clearIncomingData();
         return;
     }
 
-    // 4) Parse all "S02" sub-blocks between S01 and E01
+    // Parse all V1 S02 sub-blocks between S01 and E01.
     int counter = startPos + 3;
     while (true) {
         if (counter + 2 > endPos) break;

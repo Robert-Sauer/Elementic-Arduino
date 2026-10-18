@@ -31,6 +31,8 @@ void RestartDevice() {
   #elif defined(ARDUINO_ARCH_AVR)
     void (*resetFunc)(void) = 0;
     resetFunc();
+  #elif defined(ARDUINO_ARCH_RP2040)
+    rp2040.reboot();
   #elif defined(NVIC_SystemReset)
     NVIC_SystemReset();
   #endif
@@ -150,12 +152,12 @@ uint8_t  InOutMatrixCouter[InputChannels+1]     = {0};
 uint8_t  InOutMatrix[InputChannels+1][INOUT_MATRIX_COLS]        = {{0}};
 uint8_t  InputStatus[InputChannels+1]          = {0};
 
-char     MQTT_Output[OutputChannels+1][MAXTOPICLENGTH]      = {{0}};
-char     MQTT_Input[InputChannels+1][MAXTOPICLENGTH]        = {{0}};
+char     MQTT_Output[OutputChannels+1][ELEMENTIC_OUTPUT_TOPIC_CAPACITY] = {{0}};
+char     MQTT_Input[InputChannels+1][ELEMENTIC_INPUT_TOPIC_CAPACITY] = {{0}};
 // char     MQTT_Name[OutputChannels][10]        = {{0}}; //stil required?
 
-char Output_Name[OutputChannels+1][MAXNAMELENGTH]  = {{0}};
-char Input_Name[InputChannels+1][MAXNAMELENGTH] = {{0}};
+char Output_Name[OutputChannels+1][ELEMENTIC_OUTPUT_NAME_CAPACITY] = {{0}};
+char Input_Name[InputChannels+1][ELEMENTIC_INPUT_NAME_CAPACITY] = {{0}};
 
 uint8_t  dimvalue0           = 0;
 uint8_t  state               = 0;
@@ -208,8 +210,8 @@ void ElementicSetup(){
     Serial.read();
   }
 
-  #if defined(ESP32) || defined(ESP8266)
-    EEPROM.begin(2048);     // Only needed on ESP platforms
+  #if defined(ESP32) || defined(ESP8266) || defined(ARDUINO_ARCH_RP2040)
+    EEPROM.begin(2048);     // Flash-backed EEPROM emulation
   #endif
 
   serialsetup();

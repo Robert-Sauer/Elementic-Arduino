@@ -57,6 +57,10 @@ uint16_t configurationRegionSize() {
 }
 
 uint16_t slotSize() {
+  return configurationRegionSize();
+}
+
+uint16_t legacySlotSize() {
   return static_cast<uint16_t>(configurationRegionSize() / 2U);
 }
 
@@ -101,28 +105,41 @@ bool readSlot(uint16_t offset, uint16_t size, SlotInfo& slot) {
 }
 
 bool selectSlot(SlotInfo& selected, SlotInfo* other = 0) {
-  const uint16_t size = slotSize();
-  SlotInfo first = {};
-  SlotInfo second = {};
-  readSlot(0U, size, first);
-  readSlot(size, size, second);
-  if (first.valid && second.valid && first.generation == second.generation) {
-    selected = SlotInfo();
-    return false;
+  SlotInfo single = {};
+  SlotInfo legacyFirst = {};
+  SlotInfo legacySecond = {};
+  const uint16_t fullSize = configurationRegionSize();
+  const uint16_t oldSize = legacySlotSize();
+
+  // The first half is also the location of the new single-slot format. Read
+  // both historical half-slots as well so an upgrade can recover the newest
+  // saved generation before the first full-size write migrates it.
+  readSlot(0U, fullSize, single);
+  readSlot(0U, oldSize, legacyFirst);
+  readSlot(oldSize, oldSize, legacySecond);
+
+  SlotInfo newest = {};
+  SlotInfo runnerUp = {};
+  const SlotInfo candidates[] = {single, legacyFirst, legacySecond};
+  for (uint8_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
+    if (!candidates[i].valid) continue;
+    if (newest.valid && candidates[i].offset == newest.offset) continue;
+    if (newest.valid && candidates[i].generation == newest.generation) {
+      selected = SlotInfo();
+      if (other) *other = SlotInfo();
+      return false;
+    }
+    if (!newest.valid || candidates[i].generation > newest.generation) {
+      runnerUp = newest;
+      newest = candidates[i];
+    } else if (!runnerUp.valid || candidates[i].generation > runnerUp.generation) {
+      runnerUp = candidates[i];
+    }
   }
-  if (first.valid && (!second.valid || first.generation > second.generation)) {
-    selected = first;
-    if (other) *other = second;
-    return true;
-  }
-  if (second.valid) {
-    selected = second;
-    if (other) *other = first;
-    return true;
-  }
-  selected = SlotInfo();
-  if (other) *other = SlotInfo();
-  return false;
+
+  selected = newest;
+  if (other) *other = runnerUp;
+  return newest.valid;
 }
 
 struct RecordWriter {
@@ -206,27 +223,25 @@ void emitConfiguration(RecordWriter& writer) {
     const uint16_t item = static_cast<uint16_t>(variables[i].priority);
     emitU8(writer, 2U, 0U, item, static_cast<uint8_t>(variables[i].type));
     emitText(writer, 2U, 1U, item, variables[i].name.c_str(), variables[i].name.length() + 1U);
-    if (variables[i].name != "Mac Address") {
-      switch (variables[i].type) {
-        case DYNAMIC_STRING:
-          emitText(writer, 2U, 2U, item, variables[i].value.strVal, sizeof(variables[i].value.strVal));
-          break;
-        case DYNAMIC_PASSWORD:
-          emitText(writer, 2U, 2U, item, variables[i].value.passVal, sizeof(variables[i].value.passVal));
-          break;
-        case DYNAMIC_BYTE:
-        case DYNAMIC_BOOL:
-          emitU8(writer, 2U, 2U, item, variables[i].value.byteVal);
-          break;
-        case DYNAMIC_INT: {
-          const int16_t value = static_cast<int16_t>(variables[i].value.intVal);
-          emitU16(writer, 2U, 2U, item, static_cast<uint16_t>(value));
-          break;
-        }
-        case DYNAMIC_IP:
-          writer.record(2U, 2U, item, variables[i].value.ipVal, 4U);
-          break;
+    switch (variables[i].type) {
+      case DYNAMIC_STRING:
+        emitText(writer, 2U, 2U, item, variables[i].value.strVal, sizeof(variables[i].value.strVal));
+        break;
+      case DYNAMIC_PASSWORD:
+        emitText(writer, 2U, 2U, item, variables[i].value.passVal, sizeof(variables[i].value.passVal));
+        break;
+      case DYNAMIC_BYTE:
+      case DYNAMIC_BOOL:
+        emitU8(writer, 2U, 2U, item, variables[i].value.byteVal);
+        break;
+      case DYNAMIC_INT: {
+        const int16_t value = static_cast<int16_t>(variables[i].value.intVal);
+        emitU16(writer, 2U, 2U, item, static_cast<uint16_t>(value));
+        break;
       }
+      case DYNAMIC_IP:
+        writer.record(2U, 2U, item, variables[i].value.ipVal, 4U);
+        break;
     }
     emitU8(writer, 2U, 5U, item, DynamicVariableStatus[i]);
   }
@@ -242,8 +257,8 @@ bool validateRecord(uint8_t category, uint8_t field, uint16_t item,
     if (item == 0U || item > OutputChannels) return false;
     if (field == 0U || field == 2U || field == 10U) return length == 2U;
     if (field == 1U || (field >= 3U && field <= 5U) || field == 8U) return length == 1U;
-    if (field == 6U) return length < MAXNAMELENGTH;
-    if (field == 7U) return length < MAXTOPICLENGTH;
+    if (field == 6U) return length <= ELEMENTIC_OUTPUT_NAME_MAX_BYTES;
+    if (field == 7U) return length <= ELEMENTIC_OUTPUT_TOPIC_MAX_BYTES;
     return false;
   }
   if (category == 1U) {
@@ -257,9 +272,9 @@ bool validateRecord(uint8_t category, uint8_t field, uint16_t item,
       }
       return true;
     }
-    if (field == 2U) return length < MAXTOPICLENGTH;
+    if (field == 2U) return length <= ELEMENTIC_INPUT_TOPIC_MAX_BYTES;
     if (field == 3U) return length == 1U && EEPROM.read(valueOffset) == 1U;
-    if (field == 5U) return length < MAXNAMELENGTH;
+    if (field == 5U) return length <= ELEMENTIC_INPUT_NAME_MAX_BYTES;
     return false;
   }
   if (category == 2U) {
@@ -307,11 +322,41 @@ void copyTextFromEeprom(char* destination, size_t capacity, uint32_t offset, uin
   destination[count] = '\0';
 }
 
+int findVariableIndexByStoredName(uint32_t offset, uint16_t length) {
+  for (int index = 0; index < totalVariables; ++index) {
+    if (variables[index].name.length() != length) continue;
+    bool equal = true;
+    for (uint16_t i = 0; i < length; ++i) {
+      if (variables[index].name.charAt(i) != static_cast<char>(EEPROM.read(offset + i))) {
+        equal = false;
+        break;
+      }
+    }
+    if (equal) return index;
+  }
+  return -1;
+}
+
+bool storedValueLengthMatches(VariableType type, uint16_t length) {
+  switch (type) {
+    case DYNAMIC_STRING:
+    case DYNAMIC_PASSWORD: return true;
+    case DYNAMIC_BYTE:
+    case DYNAMIC_BOOL: return length == 1U;
+    case DYNAMIC_INT: return length == 2U;
+    case DYNAMIC_IP: return length == 4U;
+  }
+  return false;
+}
+
 bool applyPayload(const SlotInfo& slot) {
   uint32_t position = static_cast<uint32_t>(slot.offset) + CONFIG_HEADER_SIZE;
   const uint32_t end = position + slot.payloadLength;
   uint16_t maxOutput = 0U;
   uint16_t maxInput = 0U;
+  uint16_t genericItem = 0U;
+  int genericIndex = -1;
+  int storedGenericType = -1;
   while (position < end) {
     const uint8_t category = EEPROM.read(position);
     const uint8_t field = EEPROM.read(position + 1U);
@@ -341,18 +386,32 @@ bool applyPayload(const SlotInfo& slot) {
       } else if (field == 2U) copyTextFromEeprom(MQTT_Input[item], sizeof(MQTT_Input[item]), value, length);
       else if (field == 5U) copyTextFromEeprom(Input_Name[item], sizeof(Input_Name[item]), value, length);
     } else if (category == 2U) {
-      const int index = findVariableIndexByPriority(item);
-      if (index >= 0 && index < totalVariables) {
-        if (field == 2U && variables[index].name != "Mac Address") {
-          switch (variables[index].type) {
-            case DYNAMIC_STRING: copyTextFromEeprom(variables[index].value.strVal, sizeof(variables[index].value.strVal), value, length); break;
-            case DYNAMIC_PASSWORD: copyTextFromEeprom(variables[index].value.passVal, sizeof(variables[index].value.passVal), value, length); break;
+      if (item != genericItem) {
+        genericItem = item;
+        genericIndex = -1;
+        storedGenericType = -1;
+      }
+      if (field == 0U) {
+        storedGenericType = EEPROM.read(value);
+      } else if (field == 1U) {
+        // Generic priorities may shift when a feature adds or removes a
+        // variable. The stored name is the stable identity; the item number is
+        // only the ordering used on the wire.
+        genericIndex = findVariableIndexByStoredName(value, length);
+      } else if (genericIndex >= 0 && genericIndex < totalVariables &&
+                 storedGenericType == static_cast<int>(variables[genericIndex].type)) {
+        if (field == 2U && storedValueLengthMatches(variables[genericIndex].type, length)) {
+          switch (variables[genericIndex].type) {
+            case DYNAMIC_STRING: copyTextFromEeprom(variables[genericIndex].value.strVal, sizeof(variables[genericIndex].value.strVal), value, length); break;
+            case DYNAMIC_PASSWORD: copyTextFromEeprom(variables[genericIndex].value.passVal, sizeof(variables[genericIndex].value.passVal), value, length); break;
             case DYNAMIC_BYTE:
-            case DYNAMIC_BOOL: variables[index].value.byteVal = EEPROM.read(value); break;
-            case DYNAMIC_INT: variables[index].value.intVal = static_cast<int16_t>(readU16(value)); break;
-            case DYNAMIC_IP: for (uint8_t i = 0; i < 4U; ++i) variables[index].value.ipVal[i] = EEPROM.read(value + i); break;
+            case DYNAMIC_BOOL: variables[genericIndex].value.byteVal = EEPROM.read(value); break;
+            case DYNAMIC_INT: variables[genericIndex].value.intVal = static_cast<int16_t>(readU16(value)); break;
+            case DYNAMIC_IP: for (uint8_t i = 0; i < 4U; ++i) variables[genericIndex].value.ipVal[i] = EEPROM.read(value + i); break;
           }
-        } else if (field == 5U) DynamicVariableStatus[index] = EEPROM.read(value);
+        } else if (field == 5U) {
+          DynamicVariableStatus[genericIndex] = EEPROM.read(value);
+        }
       }
     }
     position = value + length;
@@ -411,7 +470,7 @@ bool elementicSaveConfiguration() {
     elementicStorageStatus = ELEMENTIC_STORAGE_UNAVAILABLE;
     return false;
   }
-  const uint16_t offset = !hasActive || active.offset != 0U ? 0U : size;
+  const uint16_t offset = 0U;
   const uint32_t generation = hasActive ? active.generation + 1U : 1U;
   const uint32_t payloadBegin = static_cast<uint32_t>(offset) + CONFIG_HEADER_SIZE;
   RecordWriter measure(false, payloadBegin, static_cast<uint32_t>(offset) + size - 1U);
@@ -421,11 +480,12 @@ bool elementicSaveConfiguration() {
     return false;
   }
   const uint32_t payloadLength = measure.position - payloadBegin;
+  // Invalidate the current single-slot commit before overwriting its contents.
+  // A failed/interrupted save may lose this configuration; restore it from
+  // the Website project when one is available.
   SlotInfo previousTarget = {};
   if (readSlot(offset, size, previousTarget)) {
-    EEPROM.write(static_cast<uint32_t>(offset) + CONFIG_HEADER_SIZE +
-                     previousTarget.payloadLength,
-                 0xFFU);
+    EEPROM.write(static_cast<uint32_t>(offset) + CONFIG_HEADER_SIZE + previousTarget.payloadLength, 0xFFU);
   }
   EEPROM.write(static_cast<uint32_t>(offset) + CONFIG_HEADER_SIZE + payloadLength, 0xFFU);
   EEPROM.write(offset, 'E'); EEPROM.write(offset + 1U, 'C');
@@ -443,7 +503,7 @@ bool elementicSaveConfiguration() {
   if (!writer.ok || writer.records != measure.records || writer.position != measure.position) return false;
   writeU32(offset + 28U, crcEeprom(offset, payloadBegin, payloadLength));
   EEPROM.write(static_cast<uint32_t>(offset) + CONFIG_HEADER_SIZE + payloadLength, COMMIT_MARKER);
-  #if defined(ESP8266) || defined(ESP32)
+  #if defined(ESP8266) || defined(ESP32) || defined(ARDUINO_ARCH_RP2040)
     if (!EEPROM.commit()) return false;
   #endif
   SlotInfo verified = {};
@@ -492,13 +552,14 @@ bool elementicLoadConfiguration() {
 }
 
 bool elementicFactoryReset() {
-  const uint16_t size = slotSize();
+  const uint16_t size = configurationRegionSize();
   if (size < CONFIG_HEADER_SIZE + 1U) return false;
   EEPROM.write(CONFIG_HEADER_SIZE, 0xFFU);
-  EEPROM.write(static_cast<uint32_t>(size) + CONFIG_HEADER_SIZE, 0xFFU);
+  const uint16_t oldSize = legacySlotSize();
+  EEPROM.write(static_cast<uint32_t>(oldSize) + CONFIG_HEADER_SIZE, 0xFFU);
   EEPROM.write(0U, 0xFFU);
-  EEPROM.write(size, 0xFFU);
-  #if defined(ESP8266) || defined(ESP32)
+  EEPROM.write(oldSize, 0xFFU);
+  #if defined(ESP8266) || defined(ESP32) || defined(ARDUINO_ARCH_RP2040)
     if (!EEPROM.commit()) return false;
   #endif
   elementicLoadFactoryDefaults();

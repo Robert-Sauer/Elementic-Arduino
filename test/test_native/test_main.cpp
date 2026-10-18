@@ -48,6 +48,19 @@ void test_mac_unterminated() {
                                         output, canonical));
 }
 
+void test_mac_in_esp32_sized_buffer() {
+    char input[100] = "06E161DFBB0E";
+    uint8_t output[6] = {0};
+    char canonical[13] = {0};
+    const uint8_t expected[6] = {0x06, 0xE1, 0x61, 0xDF, 0xBB, 0x0E};
+
+    TEST_ASSERT_EQUAL(MAC_VALID,
+                      elementicParseMac(input, sizeof(input), output,
+                                        canonical));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, output, 6);
+    TEST_ASSERT_EQUAL_STRING("06E161DFBB0E", canonical);
+}
+
 void test_crc_fixture() {
     const uint8_t input[] = {'1','2','3','4','5','6','7','8','9'};
     TEST_ASSERT_EQUAL_HEX32(0xCBF43926UL, crc32(input, sizeof(input)));
@@ -140,6 +153,7 @@ int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_mac_contract);
     RUN_TEST(test_mac_unterminated);
+    RUN_TEST(test_mac_in_esp32_sized_buffer);
     RUN_TEST(test_crc_fixture);
     RUN_TEST(test_v2_project_fixture);
     RUN_TEST(test_v2_escape_fixture);

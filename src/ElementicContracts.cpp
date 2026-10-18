@@ -74,8 +74,7 @@ bool fixedLegacyWidth(uint8_t category, uint8_t field, uint8_t declared,
 
 MacResult elementicParseMac(const char* input, size_t capacity,
                             uint8_t out[6], char canonical[13]) {
-    if (input == 0 || out == 0 || canonical == 0 || capacity == 0U ||
-        capacity > 64U) {
+    if (input == 0 || out == 0 || canonical == 0 || capacity == 0U) {
         return MAC_INVALID;
     }
 

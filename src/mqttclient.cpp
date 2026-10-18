@@ -25,6 +25,20 @@
   #include <Ethernet.h>   // or Ethernet2/Ethernet3 depending on your stack
 #endif
 
+static bool elementic_mqtt_enabled() {
+  #if ELEMENTIC_PROJECT_VARIABLES_VERSION < 2
+    return true;
+  #else
+    if (!ELEMENTIC_FEATURE_MQTT) return false;
+
+    // Early v2 project revisions enabled MQTT at compile time but did not yet
+    // emit the optional runtime switch. Keep those revisions operational; when
+    // the variable exists, its value remains authoritative.
+    const int enabledIndex = findVariableIndexByName("MQTTEnabled");
+    return enabledIndex < 0 ? true : GetBoolValue("MQTTEnabled");
+  #endif
+}
+
 bool parseIP(const String& ipStr, IPAddress &ip) {
   // Helper: parse "192.168.1.4" into IPAddress
   int parts[4] = {0,0,0,0};
@@ -37,6 +51,12 @@ bool parseIP(const String& ipStr, IPAddress &ip) {
 }
 
 void reconnect() {//-----------------------Reconnect-----------------------
+  if (!elementic_mqtt_enabled()) {
+    if (mqttClient.connected()) mqttClient.disconnect();
+    SendSystem(MQTT, 0);
+    return;
+  }
+
   static uint32_t lastAttemptMs = 0;
   const uint32_t now = millis();
 
@@ -108,27 +128,31 @@ void reconnect() {//-----------------------Reconnect-----------------------
 }
 
 void MQTTSetupVariables(){
-  DefineString("MQTTName", MQTTName, PriorityCounter++);
-  DefineString("MQTTServer", MQTTServer, PriorityCounter++);
-  DefineString("MQTTUsername", MQTTUsername, PriorityCounter++);
-  DefinePassword("MQTTPassword", MQTTPassword, PriorityCounter++);
+  #if ELEMENTIC_PROJECT_VARIABLES_VERSION < 2
+    DefineString("MQTTName", MQTTName, PriorityCounter++);
+    DefineString("MQTTServer", MQTTServer, PriorityCounter++);
+    DefineString("MQTTUsername", MQTTUsername, PriorityCounter++);
+    DefinePassword("MQTTPassword", MQTTPassword, PriorityCounter++);
+  #endif
 }
 
 void MQTTSetupClient(){//-----------------------MQTT Setup-----------------------
+  if (!elementic_mqtt_enabled()) return;
 
   mqttClient.setCallback(callback);
   mqttClient.setKeepAlive(60);
   mqttClient.setSocketTimeout(5);
   // IMPORTANT: check success
-  bool ok = mqttClient.setBufferSize(512);
+  bool ok = mqttClient.setBufferSize(256);
   if (!ok) {
     // Fall back to smaller (or keep default)
-    mqttClient.setBufferSize(256);
+    mqttClient.setBufferSize(128);
   }
 }
 
 void SendOutputValueMQTT(byte id) {
 
+  if (!elementic_mqtt_enabled()) return;
   if (!mqttClient.connected()) return;
   if (!MQTT_Output[id] || MQTT_Output[id][0] == '\0') return;
 
@@ -191,8 +215,8 @@ void callback(char* topic, byte* payload, unsigned int length) {//--------------
     if (!base || base[0] == '\0') continue;
 
     // Topic must start with base
-    size_t baseLen = strnlen(base, MAXTOPICLENGTH);
-    if (baseLen == 0 || baseLen >= MAXTOPICLENGTH) continue;
+    size_t baseLen = strnlen(base, ELEMENTIC_OUTPUT_TOPIC_CAPACITY);
+    if (baseLen == 0 || baseLen >= ELEMENTIC_OUTPUT_TOPIC_CAPACITY) continue;
     if (strncmp(topic, base, baseLen) != 0) continue;
 
     const char* suffix = topic + baseLen;
@@ -275,6 +299,11 @@ void callback(char* topic, byte* payload, unsigned int length) {//--------------
 }
 
 void MQTTLoop() {
+
+  if (!elementic_mqtt_enabled()) {
+    if (mqttClient.connected()) mqttClient.disconnect();
+    return;
+  }
 
   static uint32_t lastReconnectAttempt = 0;
   static bool lastMqttState = false;

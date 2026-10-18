@@ -146,7 +146,7 @@ bool commitRecord(const uint8_t mac[6], const char unitUlid[27]) {
   for (uint8_t i = 0; i < sizeof(crcBytes); ++i) crcBytes[i] = EEPROM.read(offset + i);
   writeU32(offset + 48U, elementic::crc32(crcBytes, sizeof(crcBytes)));
   EEPROM.write(offset + 52U, COMMIT_MARKER);
-  #if defined(ESP8266) || defined(ESP32)
+  #if defined(ESP8266) || defined(ESP32) || defined(ARDUINO_ARCH_RP2040)
     if (!EEPROM.commit()) return false;
   #endif
   ProvisioningRecord verified = {};
@@ -166,10 +166,12 @@ bool chooseFallback(uint8_t mac[6], char canonical[13]) {
     memcpy(mac, persisted.mac, 6U);
     return true;
   }
-  if (validateMacBytes(factorymac, canonical)) {
-    memcpy(mac, factorymac, 6U);
-    return true;
-  }
+  #if ELEMENTIC_PROJECT_VARIABLES_VERSION < 2
+    if (validateMacBytes(factorymac, canonical)) {
+      memcpy(mac, factorymac, 6U);
+      return true;
+    }
+  #endif
   return false;
 }
 
@@ -187,6 +189,7 @@ bool elementicGetEffectiveMac(uint8_t out[6]) {
 bool elementicApplySharedMac(bool persistValue) {
   const int index = findVariableIndexByName("Mac Address");
   if (index < 0 || variables[index].type != DYNAMIC_STRING) {
+    logging(LOG_CAUTION, "MAC variable unavailable");
     elementicMacStatus = ELEMENTIC_MAC_PROVISIONING_REQUIRED;
     effectiveMacValid = false;
     return false;
@@ -199,12 +202,16 @@ bool elementicApplySharedMac(bool persistValue) {
       parsed, canonical);
   if (result != elementic::MAC_VALID) {
     if (!chooseFallback(parsed, canonical)) {
-      variables[index].value.strVal[0] = '\0';
+      // The dynamic variable is configuration data. Keep its original text so
+      // it remains visible/editable and can be stored, even when it cannot be
+      // applied to the network adapter.
       effectiveMacValid = false;
       elementicMacStatus = ELEMENTIC_MAC_PROVISIONING_REQUIRED;
+      logging(LOG_CAUTION, "Invalid MAC; network disabled");
       return false;
     }
     elementicMacStatus = ELEMENTIC_MAC_CORRECTED;
+    logging(LOG_CAUTION, "Invalid MAC; using saved fallback");
   } else {
     elementicMacStatus = ELEMENTIC_MAC_VALID;
   }
@@ -212,11 +219,17 @@ bool elementicApplySharedMac(bool persistValue) {
   memcpy(effectiveMac, parsed, sizeof(effectiveMac));
   memcpy(effectiveCanonical, canonical, sizeof(effectiveCanonical));
   effectiveMacValid = true;
-  SetStringValue("Mac Address", canonical);
 
   if (persistValue) {
     loadPersisted();
-    if (!persisted.valid || !commitRecord(parsed, persisted.unitUlid)) return false;
+    // A first unit-provisioning record needs a unit ULID supplied by the App.
+    // Until that flow exists, the ordinary dynamic-variable value is still
+    // persisted in the configuration slot. Only update EUP1 when an identity
+    // record already exists.
+    if (persisted.valid && !commitRecord(parsed, persisted.unitUlid)) {
+      logging(LOG_CAUTION, "MAC provisioning update failed");
+      return false;
+    }
   }
   return true;
 }

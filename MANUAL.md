@@ -8,8 +8,6 @@ For a normal Elementic project, the user only needs this in `src/main.cpp`:
 
 ```cpp
 #include <Arduino.h>
-#define OutputChannels 15
-#define InputChannels 15
 
 extern const uint16_t ELEMENTIC_DEVICEID = 8; // ESP32-C6
 
@@ -41,10 +39,18 @@ Supported in the current library:
 - ESP32
 - ESP8266
 - AVR boards
+- RP2040: Pico, Pico W and W5100S-EVB-Pico
+- RP2350: Pico 2 and Pico 2 W
 
 Support is target-profile specific. A successful compile alone is not proof of
 EEPROM, MAC override, network or DMX behavior. Consult
 `docs/CR-0004-stage-f-hardware-matrix.md` before selecting a production board.
+
+Pico W and Pico 2 W use their CYW43 factory MAC. The Arduino-Pico Wi-Fi API
+does not provide a supported station-MAC setter, so Elementic reports the real
+hardware address in the runtime `Mac Address` variable instead of claiming that
+a configured override was applied. WIZnet Ethernet targets continue to apply
+the configured MAC through `Ethernet.begin()`.
 
 The generated-code contract also requires metadata ABI 1 and an idempotent
 `elementicLoadFactoryDefaults()`. Manual projects should start from
@@ -56,15 +62,15 @@ Required libraries:
 - `PubSubClient`
 - `Ethernet`
 
-The number of inputs and outputs is selected before including `Elementic.h`:
+For a manual PlatformIO project, set the maximum number of inputs and outputs in `platformio.ini` so the values apply while compiling both the sketch and the Library:
 
-```cpp
-#define OutputChannels 15
-#define InputChannels 15
-#include <Elementic.h>
+```ini
+build_flags =
+    -DELEMENTIC_MAX_INPUTS=15
+    -DELEMENTIC_MAX_OUTPUTS=15
 ```
 
-Use values that are large enough for the device. For example, if the device has 8 outputs and 6 inputs, `15` and `15` is fine.
+These limits set the size of the fixed arrays in SRAM. Use values that are large enough for the project without reserving unnecessary channels. Website-generated projects receive the limits from the selected Device profile. Manual projects use explicit defaults for AVR, ESP32, ESP8266 or RP2040 from `ElementicLimits.h` when the macros are omitted. The historical `OutputChannels` and `InputChannels` names remain valid project-wide overrides.
 
 ## Functions
 
@@ -242,6 +248,8 @@ DefineBool("AutoLight", true, PriorityCounter++);
 
 Define functions are normally used in `genericsetupvariables()`. They create the variables that Elementic can later read, store, send, or update.
 
+In Website-generated projects, `include/ProjectVariablesAutomated.h` is included automatically by `Elementic.h` and selects Wi-Fi, Ethernet and MQTT at compile time. It also defines `ELEMENTIC_MAX_INPUTS`, `ELEMENTIC_MAX_OUTPUTS` and the four name/topic byte limits before the Library allocates its fixed arrays. Reducing these values saves SRAM, especially on AVR. The generated `genericsetupvariables()` then supplies the corresponding runtime defaults. `MQTTEnabled` is a normal Boolean setting for temporarily disabling MQTT; it does not replace the `ELEMENTIC_FEATURE_MQTT` compile-time flag. `Mac Address` is passed to `DefineString` as text and is validated/canonicalized before the Library converts it to hardware bytes.
+
 Example:
 
 ```cpp
@@ -335,8 +343,6 @@ If input 1 is pressed and the generic variable `AutoLight` is true, output 1 is 
 
 ```cpp
 #include <Arduino.h>
-#define OutputChannels 15
-#define InputChannels 15
 
 extern const uint16_t ELEMENTIC_DEVICEID = 8; // ESP32-C6
 

@@ -31,9 +31,9 @@ unsigned long delayTime = 0;
   #define ELEMENTIC_WEAK
 #endif
 
-// Metadata ABI 1 manual-project defaults. Generated source supplies strong
-// definitions. Firmware Project ID deliberately remains zero for old sketches;
-// legacy `projectid` is never widened as if it were authoritative.
+// Metadata ABI 1 manual-project defaults. Generated main.cpp supplies strong
+// definitions through declarations in Elementic.h. Firmware Project ID remains
+// zero for old sketches; legacy `projectid` is never widened as authoritative.
 extern const uint16_t ELEMENTIC_METADATA_ABI ELEMENTIC_WEAK = 1;
 extern const uint64_t ELEMENTIC_FIRMWARE_PROJECT_ID ELEMENTIC_WEAK = UINT64_C(0);
 extern const uint32_t ELEMENTIC_PROJECT_REVISION ELEMENTIC_WEAK = 0;
@@ -44,7 +44,7 @@ extern const char ELEMENTIC_MCU_FAMILY[17] ELEMENTIC_WEAK = "unknown";
 extern const char ELEMENTIC_APP_VERSION[32] ELEMENTIC_WEAK = "0.0.0-local";
 extern const char ELEMENTIC_BUILD_ULID[27] ELEMENTIC_WEAK = "";
 extern const char ELEMENTIC_RELEASE_ULID[27] ELEMENTIC_WEAK = "";
-extern const char ELEMENTIC_LIBRARY_VERSION[] = "1.1.0-dev";
+extern const char ELEMENTIC_LIBRARY_VERSION[] = "1.1.0";
 extern const uint16_t ELEMENTIC_STORAGE_SCHEMA = 2;
 
 #if defined(ESP8266)
@@ -55,6 +55,14 @@ extern const uint16_t ELEMENTIC_STORAGE_SCHEMA = 2;
 
 #elif defined(ESP32)
 
+  #include <WiFi.h>
+  static WiFiClient _elementic_wifiClient;
+  Client& netClient = _elementic_wifiClient;
+
+#elif ELEMENTIC_HAS_WIFI && (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_PICOW)
+
+  // The Arduino-Pico core supplies WiFiClient for both Pico W (RP2040) and
+  // Pico 2 W (RP2350). Without this branch MQTT would receive NullClient.
   #include <WiFi.h>
   static WiFiClient _elementic_wifiClient;
   Client& netClient = _elementic_wifiClient;

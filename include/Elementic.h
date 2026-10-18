@@ -6,7 +6,46 @@
 
 #pragma once
 #include <Arduino.h>
-extern const uint16_t ELEMENTIC_DEVICEID;   // user defines in sketch
+
+// Elementic-generated projects expose immutable compile-time feature choices
+// through this optional header. Historical/manual sketches do not have it and
+// keep the 1.x behavior with all platform-supported features available.
+#if defined(__has_include)
+  #if __has_include(<ProjectVariablesAutomated.h>)
+    #include <ProjectVariablesAutomated.h>
+  #endif
+#endif
+
+#ifndef ELEMENTIC_PROJECT_VARIABLES_VERSION
+  #define ELEMENTIC_PROJECT_VARIABLES_VERSION 1
+#endif
+#ifndef ELEMENTIC_FEATURE_WIFI
+  #define ELEMENTIC_FEATURE_WIFI 1
+#endif
+#ifndef ELEMENTIC_FEATURE_ETHERNET
+  #define ELEMENTIC_FEATURE_ETHERNET 1
+#endif
+#ifndef ELEMENTIC_FEATURE_MQTT
+  #define ELEMENTIC_FEATURE_MQTT 1
+#endif
+
+#include "deviceIdentification.h"
+
+#define ELEMENTIC_USE_WIFI (ELEMENTIC_HAS_WIFI && ELEMENTIC_FEATURE_WIFI)
+#define ELEMENTIC_USE_ETHERNET (ELEMENTIC_HAS_ETHERNET && ELEMENTIC_FEATURE_ETHERNET)
+#define ELEMENTIC_USE_NETWORK (ELEMENTIC_USE_WIFI || ELEMENTIC_USE_ETHERNET)
+
+#if ELEMENTIC_FEATURE_WIFI && !ELEMENTIC_HAS_WIFI && ELEMENTIC_PROJECT_VARIABLES_VERSION >= 2
+  #error "The project enables Wi-Fi, but the selected target has no Wi-Fi driver"
+#endif
+#if ELEMENTIC_FEATURE_ETHERNET && !ELEMENTIC_HAS_ETHERNET && ELEMENTIC_PROJECT_VARIABLES_VERSION >= 2
+  #error "The project enables Ethernet, but the selected target has no Ethernet driver"
+#endif
+#if ELEMENTIC_FEATURE_MQTT && !ELEMENTIC_USE_NETWORK && ELEMENTIC_PROJECT_VARIABLES_VERSION >= 2
+  #error "The project enables MQTT without an enabled network transport"
+#endif
+
+extern const uint16_t ELEMENTIC_DEVICEID;   // generated main.cpp metadata block
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -32,27 +71,49 @@ extern PubSubClient mqttClient;  // same for every board
 /* Constants */ 
 // multiple setups for different microcontrollers!
 
+#include "ElementicLimits.h"
+
 #if defined(ARDUINO_ARCH_AVR)
-  #ifndef OutputChannels
-  #define OutputChannels    23   
-  #endif
-  #ifndef InputChannels
-  #define InputChannels     19    
-  #endif
   #define MAX_STRING_LENGTH 32
-  #define MAXNAMELENGTH     10
-  #define MAXTOPICLENGTH    14
+  #define ELEMENTIC_DEFAULT_NAME_MAX_BYTES 9
+  #define ELEMENTIC_DEFAULT_TOPIC_MAX_BYTES 13
 #else
-  #ifndef OutputChannels
-  #define OutputChannels    23   
-  #endif
-  #ifndef InputChannels
-  #define InputChannels     19    
-  #endif
   #define MAX_STRING_LENGTH 100
-  #define MAXNAMELENGTH     14
-  #define MAXTOPICLENGTH    20
+  #define ELEMENTIC_DEFAULT_NAME_MAX_BYTES 13
+  #define ELEMENTIC_DEFAULT_TOPIC_MAX_BYTES 19
 #endif
+
+// Generated Device headers may override each visible UTF-8 byte limit. Manual
+// sketches retain the conservative platform defaults above.
+#ifndef ELEMENTIC_INPUT_NAME_MAX_BYTES
+  #define ELEMENTIC_INPUT_NAME_MAX_BYTES ELEMENTIC_DEFAULT_NAME_MAX_BYTES
+#endif
+#ifndef ELEMENTIC_INPUT_TOPIC_MAX_BYTES
+  #define ELEMENTIC_INPUT_TOPIC_MAX_BYTES ELEMENTIC_DEFAULT_TOPIC_MAX_BYTES
+#endif
+#ifndef ELEMENTIC_OUTPUT_NAME_MAX_BYTES
+  #define ELEMENTIC_OUTPUT_NAME_MAX_BYTES ELEMENTIC_DEFAULT_NAME_MAX_BYTES
+#endif
+#ifndef ELEMENTIC_OUTPUT_TOPIC_MAX_BYTES
+  #define ELEMENTIC_OUTPUT_TOPIC_MAX_BYTES ELEMENTIC_DEFAULT_TOPIC_MAX_BYTES
+#endif
+
+#if ELEMENTIC_INPUT_NAME_MAX_BYTES < 1 || ELEMENTIC_INPUT_NAME_MAX_BYTES > 63 || \
+    ELEMENTIC_OUTPUT_NAME_MAX_BYTES < 1 || ELEMENTIC_OUTPUT_NAME_MAX_BYTES > 63
+  #error "Elementic input/output name limits must be 1..63 UTF-8 bytes"
+#endif
+#if ELEMENTIC_INPUT_TOPIC_MAX_BYTES < 1 || ELEMENTIC_INPUT_TOPIC_MAX_BYTES > 127 || \
+    ELEMENTIC_OUTPUT_TOPIC_MAX_BYTES < 1 || ELEMENTIC_OUTPUT_TOPIC_MAX_BYTES > 127
+  #error "Elementic input/output MQTT topic limits must be 1..127 UTF-8 bytes"
+#endif
+
+#define ELEMENTIC_INPUT_NAME_CAPACITY (ELEMENTIC_INPUT_NAME_MAX_BYTES + 1)
+#define ELEMENTIC_INPUT_TOPIC_CAPACITY (ELEMENTIC_INPUT_TOPIC_MAX_BYTES + 1)
+#define ELEMENTIC_OUTPUT_NAME_CAPACITY (ELEMENTIC_OUTPUT_NAME_MAX_BYTES + 1)
+#define ELEMENTIC_OUTPUT_TOPIC_CAPACITY (ELEMENTIC_OUTPUT_TOPIC_MAX_BYTES + 1)
+// Backward-compatible shared capacities for third-party sketches.
+#define MAXNAMELENGTH ((ELEMENTIC_INPUT_NAME_CAPACITY > ELEMENTIC_OUTPUT_NAME_CAPACITY) ? ELEMENTIC_INPUT_NAME_CAPACITY : ELEMENTIC_OUTPUT_NAME_CAPACITY)
+#define MAXTOPICLENGTH ((ELEMENTIC_INPUT_TOPIC_CAPACITY > ELEMENTIC_OUTPUT_TOPIC_CAPACITY) ? ELEMENTIC_INPUT_TOPIC_CAPACITY : ELEMENTIC_OUTPUT_TOPIC_CAPACITY)
 
 
 
@@ -73,7 +134,8 @@ extern PubSubClient mqttClient;  // same for every board
 enum SystemType {
     IDLE = 0, BOOTING, ETHERNET, MQTT, ERROR,
     UPTIME, COMMAND, EEPROMBYTES, RAMBYTES, DEVICETYPE,
-    NUMOUTPUTS, MAXOUTPUTS, NUMINPUTS, MAXINPUTS, DELETEOUTPUT, DELETEINPUT, MAXCHARNAME, MAXCHARTOPIC, PROJECTID
+    NUMOUTPUTS, MAXOUTPUTS, NUMINPUTS, MAXINPUTS, DELETEOUTPUT, DELETEINPUT, MAXCHARNAME, MAXCHARTOPIC, PROJECTID,
+    MAXOUTPUTNAME, MAXOUTPUTTOPIC, MAXINPUTNAME, MAXINPUTTOPIC
 };
 
 enum CommandType {
@@ -133,9 +195,10 @@ extern const char defaultvalue_set[]    PROGMEM;
 extern const int device_type PROGMEM;
 extern const long projectid;
 
-// Generated-code metadata ABI 1. Generated projects provide strong
-// definitions; weak manual defaults keep historical sketches buildable and
-// report firmware Project ID zero rather than truncating legacy projectid.
+// Generated-code metadata ABI 1. Elementic.h is the single declaration point;
+// generated main.cpp supplies the strong definitions. Weak manual defaults
+// keep historical sketches buildable and report firmware Project ID zero
+// rather than truncating legacy projectid.
 extern const uint16_t ELEMENTIC_METADATA_ABI;
 extern const uint64_t ELEMENTIC_FIRMWARE_PROJECT_ID;
 extern const uint32_t ELEMENTIC_PROJECT_REVISION;
@@ -184,11 +247,11 @@ extern int SwitchTimer[InputChannels+1];
 extern uint8_t InOutMatrixCouter[InputChannels+1];
 extern uint8_t InOutMatrix[InputChannels+1][INOUT_MATRIX_COLS];
 extern uint8_t InputStatus[InputChannels+1];
-extern char MQTT_Output[OutputChannels+1][MAXTOPICLENGTH];
-extern char MQTT_Input[InputChannels+1][MAXTOPICLENGTH];
+extern char MQTT_Output[OutputChannels+1][ELEMENTIC_OUTPUT_TOPIC_CAPACITY];
+extern char MQTT_Input[InputChannels+1][ELEMENTIC_INPUT_TOPIC_CAPACITY];
 // extern char MQTT_Name[OutputChannels][10]; //27-11-2025 overbodig??
-extern char Output_Name[OutputChannels+1][MAXNAMELENGTH];
-extern char Input_Name[InputChannels+1][MAXNAMELENGTH];
+extern char Output_Name[OutputChannels+1][ELEMENTIC_OUTPUT_NAME_CAPACITY];
+extern char Input_Name[InputChannels+1][ELEMENTIC_INPUT_NAME_CAPACITY];
 extern uint8_t dimvalue0;
 extern uint8_t state;
 extern uint8_t DMXBuffer[DMX_MAX];
@@ -234,19 +297,21 @@ enum ElementicStorageStatus : uint8_t {
 extern ElementicMacStatus elementicMacStatus;
 extern ElementicStorageStatus elementicStorageStatus;
 
-extern const char MQTTName[];
-extern const char MQTTServer[];
-extern const char MQTTUsername[];
-extern const char MQTTPassword[] ;
+#if ELEMENTIC_PROJECT_VARIABLES_VERSION < 2
+  extern const char MQTTName[];
+  extern const char MQTTServer[];
+  extern const char MQTTUsername[];
+  extern const char MQTTPassword[];
 
-extern const uint8_t factorymac[];
-extern const bool factoryDHCP;
-extern const uint8_t factoryip[];
-extern const uint8_t factorygateway[];
-extern const uint8_t factorysubnet[];
-extern const char factoryhostname[];
-extern const char factorySSID[];
-extern const char factoryWIFIPassword[];
+  extern const uint8_t factorymac[];
+  extern const bool factoryDHCP;
+  extern const uint8_t factoryip[];
+  extern const uint8_t factorygateway[];
+  extern const uint8_t factorysubnet[];
+  extern const char factoryhostname[];
+  extern const char factorySSID[];
+  extern const char factoryWIFIPassword[];
+#endif
 
 /* Dynamic variable system */
 extern const int totalVariables;
@@ -375,3 +440,4 @@ extern int GetPriority(const String& varName);
 enum LogLevel : uint8_t { LOG_INFO=0, LOG_CAUTION=1, LOG_WARNING=2 };
 //extern void logging(LogLevel level, char text[50]); 2026-02-14
 extern void logging(LogLevel level, const char* text);
+extern void sendSerialLog(LogLevel level, const char* text);

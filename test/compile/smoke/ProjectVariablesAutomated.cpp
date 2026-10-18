@@ -3,17 +3,6 @@
 const int device_type = 0;
 const long projectid = 0;
 
-extern const uint16_t ELEMENTIC_METADATA_ABI = 1;
-extern const uint64_t ELEMENTIC_FIRMWARE_PROJECT_ID = UINT64_C(0);
-extern const uint32_t ELEMENTIC_PROJECT_REVISION = 0;
-extern const uint16_t ELEMENTIC_CONFIG_SCHEMA = 1;
-extern const uint32_t ELEMENTIC_TARGET_REVISION = 1;
-extern const char ELEMENTIC_TARGET_PROFILE[49] = "compile-smoke";
-extern const char ELEMENTIC_MCU_FAMILY[17] = "compile-only";
-extern const char ELEMENTIC_APP_VERSION[32] = "0.0.0-local";
-extern const char ELEMENTIC_BUILD_ULID[27] = "";
-extern const char ELEMENTIC_RELEASE_ULID[27] = "";
-
 const char MQTTName[] = "";
 const char MQTTServer[] = "";
 const char MQTTUsername[] = "";

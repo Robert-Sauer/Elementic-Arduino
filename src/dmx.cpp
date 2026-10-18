@@ -36,7 +36,7 @@
     const uint8_t PORTJ_DDR_MASK = B01000000;
   #endif
 
-#elif defined(ARDUINO_RASPBERRY_PI_PICO)
+#elif defined(ARDUINO_ARCH_RP2040)
   #define DMXSerial Serial1
   const int DMX_TX_PIN = 4;  // Adjust if needed
   const int DMXDirectionPin = 5;
@@ -55,8 +55,13 @@ void DMXstart() {
     return;
   #endif
 
-  #if defined(ESP32) || defined(ARDUINO_RASPBERRY_PI_PICO)
+  #if defined(ESP32)
     DMXSerial.begin(250000, SERIAL_8N2, -1, DMX_TX_PIN);
+    pinMode(DMXDirectionPin, OUTPUT);
+    digitalWrite(DMXDirectionPin, HIGH); // Enable TX mode
+  #elif defined(ARDUINO_ARCH_RP2040)
+    DMXSerial.setTX(DMX_TX_PIN);
+    DMXSerial.begin(250000, SERIAL_8N2);
     pinMode(DMXDirectionPin, OUTPUT);
     digitalWrite(DMXDirectionPin, HIGH); // Enable TX mode
   #elif defined(ESP8266)
@@ -87,12 +92,27 @@ void DMXflush() {
     return;
   #endif
 
-  #if defined(ESP32) || defined(ESP8266) || defined(ARDUINO_RASPBERRY_PI_PICO)
+  #if defined(ESP32) || defined(ESP8266)
     DMXSerial.updateBaudRate(125000);     // BREAK
     DMXSerial.write((uint8_t)0);
     DMXSerial.flush();
 
     DMXSerial.updateBaudRate(250000);     // DMX speed
+    DMXSerial.write((uint8_t)0);          // START code
+    DMXSerial.write(DMXBuffer, DMX_MAX);
+    DMXSerial.flush();
+
+  #elif defined(ARDUINO_ARCH_RP2040)
+    // Arduino-Pico has no updateBaudRate()/four-argument begin(). Drive a
+    // standards-compliant break directly, then restart UART at DMX speed.
+    DMXSerial.end();
+    pinMode(DMX_TX_PIN, OUTPUT);
+    digitalWrite(DMX_TX_PIN, LOW);
+    delayMicroseconds(120);
+    digitalWrite(DMX_TX_PIN, HIGH);
+    delayMicroseconds(12);
+    DMXSerial.setTX(DMX_TX_PIN);
+    DMXSerial.begin(250000, SERIAL_8N2);
     DMXSerial.write((uint8_t)0);          // START code
     DMXSerial.write(DMXBuffer, DMX_MAX);
     DMXSerial.flush();
