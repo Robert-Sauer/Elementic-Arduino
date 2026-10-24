@@ -35,64 +35,64 @@ for (int i=1; i <= OutputCounter; i++){
         switch (OutputType[i]){
         case 1: //Lamp aan/uit
         strcpy_P(suffixBuf, onoffset);
-        snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
-        mqttClient.publish(msgmqtt,"INITIALIZED");
+        ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
+        ELEMENTIC_PUBLISH_LITERAL(msgmqtt, "INITIALIZED");
         mqttClient.subscribe(msgmqtt);
         break;
         case 2: //Lamp PWM
         strcpy_P(suffixBuf, onoffset);
-        snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
-        mqttClient.publish(msgmqtt,"INITIALIZED");
+        ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
+        ELEMENTIC_PUBLISH_LITERAL(msgmqtt, "INITIALIZED");
         mqttClient.subscribe(msgmqtt);
         strcpy_P(suffixBuf, dimvalue_set);
-        snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
-        mqttClient.publish(msgmqtt,"INITIALIZED");
+        ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
+        ELEMENTIC_PUBLISH_LITERAL(msgmqtt, "INITIALIZED");
         mqttClient.subscribe(msgmqtt);
         strcpy_P(suffixBuf, defaultvalue_set);
-        snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
-        mqttClient.publish(msgmqtt,"INITIALIZED");
+        ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
+        ELEMENTIC_PUBLISH_LITERAL(msgmqtt, "INITIALIZED");
         mqttClient.subscribe(msgmqtt);
         break;
         case 3: //RGB DMX
         strcpy_P(suffixBuf, color_set);
-        snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
-        mqttClient.publish(msgmqtt,"INITIALIZEDRGB");
+        ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
+        ELEMENTIC_PUBLISH_LITERAL(msgmqtt, "INITIALIZEDRGB");
         mqttClient.subscribe(msgmqtt);
         break;
         case 4: //LAMP DMX
         strcpy_P(suffixBuf, onoffset);
-        snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
-        mqttClient.publish(msgmqtt,"INITIALIZED");
+        ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
+        ELEMENTIC_PUBLISH_LITERAL(msgmqtt, "INITIALIZED");
         mqttClient.subscribe(msgmqtt);
         strcpy_P(suffixBuf, dimvalue_set);
-        snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
-        mqttClient.publish(msgmqtt,"INITIALIZED");
+        ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
+        ELEMENTIC_PUBLISH_LITERAL(msgmqtt, "INITIALIZED");
         mqttClient.subscribe(msgmqtt);
         strcpy_P(suffixBuf, defaultvalue_set);
-        snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
-        mqttClient.publish(msgmqtt,"INITIALIZED");
+        ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
+        ELEMENTIC_PUBLISH_LITERAL(msgmqtt, "INITIALIZED");
         mqttClient.subscribe(msgmqtt);
         break;
         case 5: //Lamp aan/uit (Ext.)
         strcpy_P(suffixBuf, onoffstatus);
-        snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
-        mqttClient.publish(msgmqtt,"INITIALIZED");
+        ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
+        ELEMENTIC_PUBLISH_LITERAL(msgmqtt, "INITIALIZED");
         mqttClient.subscribe(msgmqtt);
         break;
         case 6: //Lamp PWM (Ext.)
         strcpy_P(suffixBuf, dimvalue_status);
-        snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
-        mqttClient.publish(msgmqtt,"INITIALIZED");
+        ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
+        ELEMENTIC_PUBLISH_LITERAL(msgmqtt, "INITIALIZED");
         mqttClient.subscribe(msgmqtt);
         strcpy_P(suffixBuf, defaultvalue_set);
-        snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
+        ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
         //mqttClient.publish(msgmqtt,"INITIALIZED");
         mqttClient.subscribe(msgmqtt);
         break;
         case 7: //Signal
         strcpy_P(suffixBuf, onoffstatus);
-        snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
-        mqttClient.publish(msgmqtt,"INITIALIZED");
+        ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
+        ELEMENTIC_PUBLISH_LITERAL(msgmqtt, "INITIALIZED");
         mqttClient.subscribe(msgmqtt);
         break;
         }
@@ -215,8 +215,8 @@ void output(){
                     if(OutputValueActual[i]!=OutputValueMemory[i])
                     {
                         strcpy_P(suffixBuf, dimvalue_set);
-                        snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
-                        snprintf(msgmqtt2, sizeof(msgmqtt2), "%d", OutputValueActual[i]);
+                        ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
+                        ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "%d", OutputValueActual[i]);
 
                         if (mqttClient.publish(msgmqtt, msgmqtt2)) {
                             OutputValueMemory[i] = OutputValueActual[i];
@@ -254,7 +254,7 @@ void output(){
                         OutputSignalCountdown[i] = (((uint16_t)OutputMaxValue[i] << 8) | (uint16_t)OutputMinValue[i]);
 
                         SendOutputValueMQTT(i);
-                        snprintf(msgmqtt2, sizeof(msgmqtt2), "Set timer to: %lu ms.", (unsigned long)OutputSignalCountdown[i] * 10UL);
+                        ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "Set timer to: %lu ms.", (unsigned long)OutputSignalCountdown[i] * 10UL);
                         logging(LOG_INFO,msgmqtt2);
                         }
                     if (OutputSignalCountdown[i]>0){
@@ -277,17 +277,17 @@ void output(){
                     if (OutputSignalCountdown[i] == 0) {
                         if (OutputDefaultValue[i] & 0x01) { // NormallyOn = 1
                             digitalWrite(OutputPin[i], HIGH);
-                            logging(LOG_INFO, "Set output to high");
+                            ELEMENTIC_LOG(LOG_INFO, "Set output to high");
                         } else { // NormallyOn = 0
                             digitalWrite(OutputPin[i], LOW);
-                            logging(LOG_INFO, "Set output to low");
+                            ELEMENTIC_LOG(LOG_INFO, "Set output to low");
                         }
 
                         OutputValueMemory[i] = 0;
                         OutputValueActual[i] = 0;
                         SendOutputValueMQTT(i);
                         SendOutputValueSerial(i, 0);
-                        logging(LOG_INFO, "End timer");
+                        ELEMENTIC_LOG(LOG_INFO, "End timer");
                     }
 
                 break;

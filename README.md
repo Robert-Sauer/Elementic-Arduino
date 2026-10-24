@@ -103,6 +103,20 @@ A generated project header provides compile-time selection:
 
 The generated capacity and text limits come from the selected Device profile. Lower values reserve less SRAM; the generated project is rejected if its configured input or output count exceeds the corresponding capacity.
 
+## Version 1.1.1 SRAM optimization
+
+Version 1.1.1 keeps constant Elementic diagnostics and printf-style format
+strings in program flash on AVR instead of copying them into SRAM at startup.
+Runtime buffers still use the original
+`const char*` logging API, while literal call sites use the flash-aware
+`ELEMENTIC_LOG`, `ELEMENTIC_SNPRINTF`, and `ELEMENTIC_SPRINTF` helpers.
+
+The V1 and V2 wire formats, MQTT payload text, EEPROM layout, and public
+runtime logging overload remain unchanged. ESP8266, ESP32, RP2040, and RP2350
+map these helpers to their normal memory model. Generated project names,
+topics, and generic-variable defaults are deliberately outside this first
+release and remain a possible later optimization.
+
 Its generated source registers runtime defaults:
 
 ```cpp

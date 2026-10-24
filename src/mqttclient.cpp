@@ -7,6 +7,15 @@
 #include <Arduino.h>
 #include <PubSubClient.h>
 #include "Elementic.h"
+
+#if defined(ARDUINO_ARCH_AVR)
+bool elementicPublishFlash(const char* topic, const __FlashStringHelper* payload) {
+  if (topic == 0 || payload == 0) return false;
+  strncpy_P(msgmqtt2, reinterpret_cast<const char*>(payload), sizeof(msgmqtt2) - 1U);
+  msgmqtt2[sizeof(msgmqtt2) - 1U] = '\0';
+  return mqttClient.publish(topic, msgmqtt2);
+}
+#endif
 #include "deviceIdentification.h"
 
 #if ELEMENTIC_HAS_WIFI
@@ -65,7 +74,7 @@ void reconnect() {//-----------------------Reconnect-----------------------
   if ((uint32_t)(now - lastAttemptMs) < 2000UL) return;
   lastAttemptMs = now;
 
-  logging(LOG_INFO, "Attempting MQTT connection...");
+  ELEMENTIC_LOG(LOG_INFO, "Attempting MQTT connection...");
   SendSystem(MQTT, 2);
 
   // ---- Build stable buffers (avoid String lifetime pitfalls & heap churn) ----
@@ -84,7 +93,7 @@ void reconnect() {//-----------------------Reconnect-----------------------
   // Keep it short to avoid packet issues.
   #if defined(ESP8266)
     char uniqueId[64];
-    snprintf(uniqueId, sizeof(uniqueId), "%s-%06X", clientId, ESP.getChipId());
+    ELEMENTIC_SNPRINTF(uniqueId, sizeof(uniqueId), "%s-%06X", clientId, ESP.getChipId());
     strlcpy(clientId, uniqueId, sizeof(clientId));
   #endif
 
@@ -103,7 +112,7 @@ void reconnect() {//-----------------------Reconnect-----------------------
   // ---- Connect and CHECK result ----
   bool ok = mqttClient.connect(clientId, user, pass);
   if (ok) {
-    logging(LOG_INFO, "MQTT Connected");
+    ELEMENTIC_LOG(LOG_INFO, "MQTT Connected");
     SendSystem(MQTT, 1);
 
     // Subscribe QUICKLY, no heavy work here
@@ -114,11 +123,11 @@ void reconnect() {//-----------------------Reconnect-----------------------
 
   } else {
     SendSystem(MQTT, 0);
-    snprintf(msgmqtt2, sizeof(msgmqtt2), "MQTT connect failed, state=%d", mqttClient.state());
+    ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "MQTT connect failed, state=%d", mqttClient.state());
     logging(LOG_INFO, msgmqtt2);
 
     #if defined(ESP8266)
-        snprintf(msgmqtt2, sizeof(msgmqtt2), "Heap after failed connect: %u", ESP.getFreeHeap());
+        ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "Heap after failed connect: %u", ESP.getFreeHeap());
         logging(LOG_INFO, msgmqtt2);
     #endif
   }
@@ -164,7 +173,7 @@ void SendOutputValueMQTT(byte id) {
     case 5: // Lamp aan/uit (Ext.)
       strncpy_P(suffixBuf, onoffstatus, sizeof(suffixBuf) - 1);
       suffixBuf[sizeof(suffixBuf) - 1] = '\0';
-      snprintf(msgmqtt2, sizeof(msgmqtt2), "%s",
+      ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "%s",
                OutputValueActual[id] == 0 ? "OFF" : "ON");
       break;
 
@@ -173,7 +182,7 @@ void SendOutputValueMQTT(byte id) {
     default:
       strncpy_P(suffixBuf, dimvalue_status, sizeof(suffixBuf) - 1);
       suffixBuf[sizeof(suffixBuf) - 1] = '\0';
-      snprintf(msgmqtt2, sizeof(msgmqtt2), "%u",
+      ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "%u",
                (unsigned)OutputValueActual[id]);
       break;
 
@@ -182,7 +191,7 @@ void SendOutputValueMQTT(byte id) {
       return;  // no publish
   }
 
-  snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[id], suffixBuf);
+  ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[id], suffixBuf);
 
   mqttClient.publish(msgmqtt, msgmqtt2);
 }
@@ -191,7 +200,7 @@ void callback(char* topic, byte* payload, unsigned int length) {//--------------
 
   // 1) Safe log (OPTIONAL: you can comment out entirely to reduce load)
   // NOTE: fixed format string bug (only one %s)
-  snprintf(msgmqtt2, sizeof(msgmqtt2), "Callback topic: %s", topic);
+  ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "Callback topic: %s", topic);
   // logging(LOG_INFO, msgmqtt2);
 
   // 2) Copy payload to a safe null-terminated buffer
@@ -247,7 +256,7 @@ void callback(char* topic, byte* payload, unsigned int length) {//--------------
 
     // ----- dim value set (…/dimvalue_set) -----
     if (streq_P(suffix, dimvalue_set)) {
-      logging(LOG_INFO, "Callback dimvalue");
+      ELEMENTIC_LOG(LOG_INFO, "Callback dimvalue");
       int v = (byte)pval;
 
       if (v <= 0) {
@@ -259,7 +268,7 @@ void callback(char* topic, byte* payload, unsigned int length) {//--------------
         OutputValueActual[i] = (byte)v;
         SendOutputValueSerial(i, v);
       }
-      logging(LOG_INFO, "Callback dimvalue end");
+      ELEMENTIC_LOG(LOG_INFO, "Callback dimvalue end");
 
       MQTTUpdate[i] = true;
       continue;
@@ -317,7 +326,7 @@ void MQTTLoop() {
 
     // Detect transition to connected
     if (!lastMqttState) {
-      logging(LOG_INFO, "MQTT Connected");
+      ELEMENTIC_LOG(LOG_INFO, "MQTT Connected");
       SendSystem(MQTT, 1);
       lastMqttState = true;
     }
@@ -332,7 +341,7 @@ void MQTTLoop() {
 
     // Detect transition to disconnected
     if (lastMqttState) {
-      logging(LOG_CAUTION, "MQTT Disconnected");
+      ELEMENTIC_LOG(LOG_CAUTION, "MQTT Disconnected");
       SendSystem(MQTT, 0);
       lastMqttState = false;
     }

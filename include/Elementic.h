@@ -7,6 +7,23 @@
 #pragma once
 #include <Arduino.h>
 
+// Keep constant diagnostics and printf-style format strings out of AVR SRAM.
+// Other supported Arduino architectures memory-map their literal pool, so the
+// same call sites keep using ordinary pointers there.
+#if defined(ARDUINO_ARCH_AVR)
+  #define ELEMENTIC_FLASH_TEXT(value) F(value)
+  #define ELEMENTIC_SNPRINTF(destination, capacity, format, ...) \
+    snprintf_P((destination), (capacity), PSTR(format), ##__VA_ARGS__)
+  #define ELEMENTIC_SPRINTF(destination, format, ...) \
+    sprintf_P((destination), PSTR(format), ##__VA_ARGS__)
+#else
+  #define ELEMENTIC_FLASH_TEXT(value) value
+  #define ELEMENTIC_SNPRINTF(destination, capacity, format, ...) \
+    snprintf((destination), (capacity), (format), ##__VA_ARGS__)
+  #define ELEMENTIC_SPRINTF(destination, format, ...) \
+    sprintf((destination), (format), ##__VA_ARGS__)
+#endif
+
 // Elementic-generated projects expose immutable compile-time feature choices
 // through this optional header. Historical/manual sketches do not have it and
 // keep the 1.x behavior with all platform-supported features available.
@@ -441,3 +458,20 @@ enum LogLevel : uint8_t { LOG_INFO=0, LOG_CAUTION=1, LOG_WARNING=2 };
 //extern void logging(LogLevel level, char text[50]); 2026-02-14
 extern void logging(LogLevel level, const char* text);
 extern void sendSerialLog(LogLevel level, const char* text);
+#if defined(ARDUINO_ARCH_AVR)
+extern void logging(LogLevel level, const __FlashStringHelper* text);
+extern void sendSerialLog(LogLevel level, const __FlashStringHelper* text);
+#endif
+
+// Use this macro only with a string literal. Runtime char buffers continue to
+// call logging() directly through the existing const char* overload.
+#define ELEMENTIC_LOG(level, literal) logging((level), ELEMENTIC_FLASH_TEXT(literal))
+
+#if defined(ARDUINO_ARCH_AVR)
+extern bool elementicPublishFlash(const char* topic, const __FlashStringHelper* payload);
+#define ELEMENTIC_PUBLISH_LITERAL(topic, literal) \
+  elementicPublishFlash((topic), F(literal))
+#else
+#define ELEMENTIC_PUBLISH_LITERAL(topic, literal) \
+  mqttClient.publish((topic), (literal))
+#endif

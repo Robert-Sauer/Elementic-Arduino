@@ -44,7 +44,7 @@ extern const char ELEMENTIC_MCU_FAMILY[17] ELEMENTIC_WEAK = "unknown";
 extern const char ELEMENTIC_APP_VERSION[32] ELEMENTIC_WEAK = "0.0.0-local";
 extern const char ELEMENTIC_BUILD_ULID[27] ELEMENTIC_WEAK = "";
 extern const char ELEMENTIC_RELEASE_ULID[27] ELEMENTIC_WEAK = "";
-extern const char ELEMENTIC_LIBRARY_VERSION[] = "1.1.0";
+extern const char ELEMENTIC_LIBRARY_VERSION[] = "1.1.1";
 extern const uint16_t ELEMENTIC_STORAGE_SCHEMA = 2;
 
 #if defined(ESP8266)

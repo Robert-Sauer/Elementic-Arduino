@@ -67,7 +67,7 @@ bool validUnitUlid(const char value[27]) {
 bool validateMacBytes(const uint8_t mac[6], char canonical[13]) {
   if (mac == 0) return false;
   char text[13];
-  snprintf(text, sizeof(text), "%02X%02X%02X%02X%02X%02X",
+  ELEMENTIC_SNPRINTF(text, sizeof(text), "%02X%02X%02X%02X%02X%02X",
            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
   uint8_t parsed[6];
   return elementic::elementicParseMac(text, sizeof(text), parsed, canonical) ==
@@ -189,7 +189,7 @@ bool elementicGetEffectiveMac(uint8_t out[6]) {
 bool elementicApplySharedMac(bool persistValue) {
   const int index = findVariableIndexByName("Mac Address");
   if (index < 0 || variables[index].type != DYNAMIC_STRING) {
-    logging(LOG_CAUTION, "MAC variable unavailable");
+    ELEMENTIC_LOG(LOG_CAUTION, "MAC variable unavailable");
     elementicMacStatus = ELEMENTIC_MAC_PROVISIONING_REQUIRED;
     effectiveMacValid = false;
     return false;
@@ -207,11 +207,11 @@ bool elementicApplySharedMac(bool persistValue) {
       // applied to the network adapter.
       effectiveMacValid = false;
       elementicMacStatus = ELEMENTIC_MAC_PROVISIONING_REQUIRED;
-      logging(LOG_CAUTION, "Invalid MAC; network disabled");
+      ELEMENTIC_LOG(LOG_CAUTION, "Invalid MAC; network disabled");
       return false;
     }
     elementicMacStatus = ELEMENTIC_MAC_CORRECTED;
-    logging(LOG_CAUTION, "Invalid MAC; using saved fallback");
+    ELEMENTIC_LOG(LOG_CAUTION, "Invalid MAC; using saved fallback");
   } else {
     elementicMacStatus = ELEMENTIC_MAC_VALID;
   }
@@ -227,7 +227,7 @@ bool elementicApplySharedMac(bool persistValue) {
     // persisted in the configuration slot. Only update EUP1 when an identity
     // record already exists.
     if (persisted.valid && !commitRecord(parsed, persisted.unitUlid)) {
-      logging(LOG_CAUTION, "MAC provisioning update failed");
+      ELEMENTIC_LOG(LOG_CAUTION, "MAC provisioning update failed");
       return false;
     }
   }
@@ -237,7 +237,7 @@ bool elementicApplySharedMac(bool persistValue) {
 bool elementicProvisionMac(const uint8_t mac[6], const char unitUlid[27]) {
   if (!commitRecord(mac, unitUlid)) return false;
   memcpy(effectiveMac, mac, sizeof(effectiveMac));
-  snprintf(effectiveCanonical, sizeof(effectiveCanonical), "%02X%02X%02X%02X%02X%02X",
+  ELEMENTIC_SNPRINTF(effectiveCanonical, sizeof(effectiveCanonical), "%02X%02X%02X%02X%02X%02X",
            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
   effectiveMacValid = true;
   elementicMacStatus = ELEMENTIC_MAC_VALID;

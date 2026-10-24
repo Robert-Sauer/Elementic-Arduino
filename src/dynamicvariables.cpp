@@ -75,7 +75,7 @@ void DefineString(const String& varName, const char val[20], int priority) {
         variables[idx].priority = priority;
         stringIndex++;
     } else {
-        Serial.println("No more space for strings!");
+        Serial.println(F("No more space for strings!"));
     }
 }
 //void DefineString(const String& varName, char val[20], int priority) {
@@ -104,7 +104,7 @@ void DefineByte(const String& varName, byte val, int priority) {
         variables[idx].priority = priority;
         byteIndex++;
     } else {
-        Serial.println("No more space for bytes!");
+        Serial.println(F("No more space for bytes!"));
     }
 }
 
@@ -117,7 +117,7 @@ void DefineInt(const String& varName, int val, int priority) {
         variables[idx].priority = priority;
         intIndex++;
     } else {
-        Serial.println("No more space for ints!");
+        Serial.println(F("No more space for ints!"));
     }
 }
 
@@ -133,7 +133,7 @@ void DefineIP(const String& varName, byte ip1, byte ip2, byte ip3, byte ip4, int
         variables[idx].priority = priority;
         ipIndex++;
     } else {
-        Serial.println("No more space for IPs!");
+        Serial.println(F("No more space for IPs!"));
     }
 }
 
@@ -149,7 +149,7 @@ variables[idx].value.passVal[MAX_STRING_LENGTH - 1] = '\0';
         variables[idx].priority = priority;
         passwordIndex++;
     } else {
-        Serial.println("No more space for Passwords!");
+        Serial.println(F("No more space for Passwords!"));
     }
 }
 
@@ -162,7 +162,7 @@ void DefineBool(const String& varName, bool val, int priority) {
         variables[idx].priority = priority;
         boolIndex++;
     } else {
-        Serial.println("No more space for bools!");
+        Serial.println(F("No more space for bools!"));
     }
 }
 
@@ -354,11 +354,11 @@ void ProcessVariablesByPriority(void (*action)(DynamicVariable &)) {
 
 // Example action function to show each variable
 void exampleAction(DynamicVariable &var) {
-    Serial.print("Processing: ");
+    Serial.print(F("Processing: "));
     Serial.print(var.name);
-    Serial.print(" | Priority: ");
+    Serial.print(F(" | Priority: "));
     Serial.print(var.priority);
-    Serial.print(" | Value: ");
+    Serial.print(F(" | Value: "));
 
     switch (var.type) {
         case DYNAMIC_STRING:
@@ -371,16 +371,16 @@ void exampleAction(DynamicVariable &var) {
             Serial.println(var.value.intVal);
             break;
         case DYNAMIC_IP:
-            Serial.print(var.value.ipVal[0]); Serial.print(".");
-            Serial.print(var.value.ipVal[1]); Serial.print(".");
-            Serial.print(var.value.ipVal[2]); Serial.print(".");
+            Serial.print(var.value.ipVal[0]); Serial.print(F("."));
+            Serial.print(var.value.ipVal[1]); Serial.print(F("."));
+            Serial.print(var.value.ipVal[2]); Serial.print(F("."));
             Serial.println(var.value.ipVal[3]);
             break;
         case DYNAMIC_PASSWORD:
             Serial.println(var.value.passVal);
             break;
         case DYNAMIC_BOOL:
-            Serial.println(var.value.byteVal ? "true" : "false");
+            Serial.println(var.value.byteVal ? F("true") : F("false"));
             break;
     }
 }

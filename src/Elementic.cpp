@@ -215,10 +215,10 @@ void ElementicSetup(){
   #endif
 
   serialsetup();
-  logging(LOG_INFO,"Booting. . .");
+  ELEMENTIC_LOG(LOG_INFO, "Booting. . .");
 
   #if defined(ESP8266)
-    snprintf(msgmqtt2, sizeof(msgmqtt2), "Moving output: %s", ESP.getResetReason().c_str());
+    ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "Moving output: %s", ESP.getResetReason().c_str());
     logging(LOG_INFO,msgmqtt2);
   #endif
 
@@ -267,22 +267,22 @@ void ElementicLoop(){
   case RAMTOEEPROM:
     // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", GetStringValue("MQTTName").c_str(), "/LOG");
     // mqttClient.publish(msgmqtt, "Store Data to EEPROM");
-    logging(LOG_INFO,"Store Data to EEPROM");
+    ELEMENTIC_LOG(LOG_INFO, "Store Data to EEPROM");
     if (!elementicSaveConfiguration()) {
-      logging(LOG_WARNING,"Store configuration failed");
+      ELEMENTIC_LOG(LOG_WARNING, "Store configuration failed");
     }
     break;
   case EEPROMTORAM:
     // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", GetStringValue("MQTTName").c_str(), "/LOG");
     // mqttClient.publish(msgmqtt, "Restore Data from EEPROM");
-    logging(LOG_INFO,"Restore Data from EEPROM");
+    ELEMENTIC_LOG(LOG_INFO, "Restore Data from EEPROM");
     elementicLoadFactoryDefaults();
     elementicLoadConfiguration();
     break;
   case FACTORYSETTINGS:
-    logging(LOG_INFO,"Factory settings: restore compiled defaults");
+    ELEMENTIC_LOG(LOG_INFO, "Factory settings: restore compiled defaults");
     if (!elementicFactoryReset()) {
-      logging(LOG_WARNING,"Factory settings: storage commit failed");
+      ELEMENTIC_LOG(LOG_WARNING, "Factory settings: storage commit failed");
       break;
     }
     SendSystem(EEPROMBYTES, EEPROMStorage);
@@ -297,13 +297,13 @@ void ElementicLoop(){
     if (DeleteOutput < 1 || DeleteOutput > OutputCounter) return;
 
     //int i0 = DeleteOutput - 1; // 0-based
-    snprintf(msgmqtt2, sizeof(msgmqtt2), "Deleting output: %d", DeleteOutput);
+    ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "Deleting output: %d", DeleteOutput);
     logging(LOG_INFO,msgmqtt2);
 
     for (int i = DeleteOutput; i < OutputCounter; i++)
     {
         // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/LOG2");
-        snprintf(msgmqtt2, sizeof(msgmqtt2), "Moving output: %d", i);
+        ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "Moving output: %d", i);
         logging(LOG_INFO,msgmqtt2);
         // Shift text arrays
         strcpy(Output_Name[i],        Output_Name[i + 1]);
@@ -357,7 +357,7 @@ void ElementicLoop(){
     for (int i = DeleteInput; i < SwitchCounter ; i++)
     {
       //  snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/LOG2");
-        snprintf(msgmqtt2, sizeof(msgmqtt2), "Moving input: %d", i);
+        ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "Moving input: %d", i);
         logging(LOG_INFO,msgmqtt2);
         strcpy(Input_Name[i],   Input_Name[i + 1]);
         strcpy(MQTT_Input[i],  MQTT_Input[i + 1]);

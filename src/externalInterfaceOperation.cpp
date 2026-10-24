@@ -58,7 +58,7 @@ static inline uint16_t elementic_getDeviceId() {
 }
 
 static void elementic_mac_to_string(const uint8_t mac[6], char out[13]) {
-  snprintf(out, 13, "%02X%02X%02X%02X%02X%02X",
+  ELEMENTIC_SNPRINTF(out, 13, "%02X%02X%02X%02X%02X%02X",
            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
 
@@ -66,7 +66,7 @@ static void elementic_mac_to_string(const uint8_t mac[6], char out[13]) {
 static bool elementic_use_cyw43_hardware_mac(uint8_t mac[6]) {
   if (WiFi.macAddress(mac) == 0) {
     elementicMacStatus = ELEMENTIC_MAC_ADAPTER_UNSUPPORTED;
-    logging(LOG_WARNING, "WiFi hardware MAC unavailable");
+    ELEMENTIC_LOG(LOG_WARNING, "WiFi hardware MAC unavailable");
     return false;
   }
 
@@ -75,7 +75,7 @@ static bool elementic_use_cyw43_hardware_mac(uint8_t mac[6]) {
   const int macIndex = findVariableIndexByName("Mac Address");
   if (macIndex < 0 || variables[macIndex].type != DYNAMIC_STRING) {
     elementicMacStatus = ELEMENTIC_MAC_PROVISIONING_REQUIRED;
-    logging(LOG_CAUTION, "MAC variable unavailable");
+    ELEMENTIC_LOG(LOG_CAUTION, "MAC variable unavailable");
     return false;
   }
 
@@ -83,12 +83,12 @@ static bool elementic_use_cyw43_hardware_mac(uint8_t mac[6]) {
       strcmp(variables[macIndex].value.strVal, hardwareMac) != 0;
   if (!SetStringValue("Mac Address", hardwareMac) ||
       !elementicApplySharedMac(false)) {
-    logging(LOG_WARNING, "WiFi hardware MAC rejected");
+    ELEMENTIC_LOG(LOG_WARNING, "WiFi hardware MAC rejected");
     return false;
   }
 
   if (configuredMacDiffers) {
-    logging(LOG_CAUTION, "WiFi using hardware MAC");
+    ELEMENTIC_LOG(LOG_CAUTION, "WiFi using hardware MAC");
   }
   return true;
 }
@@ -232,7 +232,7 @@ static void connectToWiFi() {
   const String passStr = GetPasswordValue("WIFI Password");
 
   if (ssidStr.length() == 0) {
-    logging(LOG_CAUTION, "WiFi no SSID");
+    ELEMENTIC_LOG(LOG_CAUTION, "WiFi no SSID");
     return;
   }
 
@@ -253,27 +253,27 @@ static void connectToWiFi() {
     if (!elementic_use_cyw43_hardware_mac(mac)) return;
   #else
     if (!elementicApplySharedMac(false) || !elementicGetEffectiveMac(mac)) {
-      logging(LOG_WARNING, "WiFi MAC provisioning required");
+      ELEMENTIC_LOG(LOG_WARNING, "WiFi MAC provisioning required");
       return;
     }
   #endif
   #if (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_ESP8266)
     if (!wifi_set_macaddr(STATION_IF, mac)) {
       elementicMacStatus = ELEMENTIC_MAC_ADAPTER_UNSUPPORTED;
-      logging(LOG_WARNING, "WiFi MAC rejected");
+      ELEMENTIC_LOG(LOG_WARNING, "WiFi MAC rejected");
       return;
     }
   #elif (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_ESP32)
     if (esp_wifi_set_mac(WIFI_IF_STA, mac) != ESP_OK) {
       elementicMacStatus = ELEMENTIC_MAC_ADAPTER_UNSUPPORTED;
-      logging(LOG_WARNING, "WiFi MAC rejected");
+      ELEMENTIC_LOG(LOG_WARNING, "WiFi MAC rejected");
       return;
     }
   #elif (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_PICOW)
     // The CYW43 driver already uses its factory MAC.
   #else
     elementicMacStatus = ELEMENTIC_MAC_ADAPTER_UNSUPPORTED;
-    logging(LOG_WARNING, "WiFi MAC override unsupported");
+    ELEMENTIC_LOG(LOG_WARNING, "WiFi MAC override unsupported");
     return;
   #endif
 
@@ -298,7 +298,7 @@ static void connectToWiFi() {
   g_wifiBeginStarted = true;
   g_lastWiFiBeginMs = millis();
   g_lastWiFiRetryMs = millis();
-  logging(LOG_INFO, "WiFi begin");
+  ELEMENTIC_LOG(LOG_INFO, "WiFi begin");
 }
 #endif
 
@@ -308,7 +308,7 @@ static void connectToEthernet() {
 
   uint8_t mac[6];
   if (!elementicApplySharedMac(false) || !elementicGetEffectiveMac(mac)) {
-    logging(LOG_WARNING, "ETH MAC provisioning required");
+    ELEMENTIC_LOG(LOG_WARNING, "ETH MAC provisioning required");
     return;
   }
 
@@ -323,12 +323,13 @@ static void connectToEthernet() {
   const bool dhcpEnabled = GetBoolValue("DHCP");
 
   if (elementic_eth_has_link_api() && !elementic_eth_link_is_on()) {
-    logging(LOG_CAUTION, "ETH link off");
+    ELEMENTIC_LOG(LOG_CAUTION, "ETH link off");
     g_ethStarted = false;
     return;
   }
 
-  logging(LOG_INFO, dhcpEnabled ? "ETH start DHCP" : "ETH start static");
+  if (dhcpEnabled) ELEMENTIC_LOG(LOG_INFO, "ETH start DHCP");
+  else ELEMENTIC_LOG(LOG_INFO, "ETH start static");
   
 
   if (dhcpEnabled) {
@@ -337,20 +338,20 @@ static void connectToEthernet() {
     int result = Ethernet.begin(mac, 1000, 250);
 
     if (result == 0) {
-      logging(LOG_WARNING, "ETH dhcp fail");
+      ELEMENTIC_LOG(LOG_WARNING, "ETH dhcp fail");
       g_ethStarted = false;
       g_lastEthBeginMs = millis();
       return;      
     }
     if (result != 0){
-      logging(LOG_INFO, "ETH DHCP successful");
+      ELEMENTIC_LOG(LOG_INFO, "ETH DHCP successful");
 
     }
   } else {
     IPAddress ip, subnet, gw;
-    if (!elementic_read_ip("IP Address", ip))  { logging(LOG_WARNING, "ETH miss IP");  g_ethStarted = false; return; }
-    if (!elementic_read_ip("Subnet", subnet))  { logging(LOG_WARNING, "ETH miss mask"); g_ethStarted = false; return; }
-    if (!elementic_read_ip("Gateway", gw))     { logging(LOG_WARNING, "ETH miss gw");   g_ethStarted = false; return; }
+    if (!elementic_read_ip("IP Address", ip))  { ELEMENTIC_LOG(LOG_WARNING, "ETH miss IP");  g_ethStarted = false; return; }
+    if (!elementic_read_ip("Subnet", subnet))  { ELEMENTIC_LOG(LOG_WARNING, "ETH miss mask"); g_ethStarted = false; return; }
+    if (!elementic_read_ip("Gateway", gw))     { ELEMENTIC_LOG(LOG_WARNING, "ETH miss gw");   g_ethStarted = false; return; }
 
     IPAddress dns = gw;
     Ethernet.begin(mac, ip, dns, gw, subnet);
@@ -364,8 +365,8 @@ static void connectToEthernet() {
   g_ethDhcpDeferred = false;
   elementic_refreshNetworkFlags();
 
-  if (EthernetConnected) logging(LOG_INFO, "ETH ok");
-  else                   logging(LOG_CAUTION, "ETH no ip");
+  if (EthernetConnected) ELEMENTIC_LOG(LOG_INFO, "ETH ok");
+  else                   ELEMENTIC_LOG(LOG_CAUTION, "ETH no ip");
 }
 #endif
 
@@ -396,7 +397,7 @@ void connectNetwork() {
   const uint16_t deviceId = elementic_getDeviceId();
 
   if (deviceId == 0) {
-    logging(LOG_CAUTION, "Net bad dev id");
+    ELEMENTIC_LOG(LOG_CAUTION, "Net bad dev id");
     elementic_refreshNetworkFlags();
     return;
   }
@@ -410,7 +411,7 @@ void connectNetwork() {
       } else {
         g_ethDhcpDeferred = true;
         g_lastEthRetryMs = millis();
-        logging(LOG_INFO, "ETH dhcp defer");
+        ELEMENTIC_LOG(LOG_INFO, "ETH dhcp defer");
       }
       elementic_refreshNetworkFlags();
     }
@@ -448,7 +449,7 @@ void networkCheckLoop() {
           lastDhcpEnabled = dhcpEnabled;
           g_ethStarted = false;
           g_ethDhcpDeferred = false;
-          logging(LOG_INFO, "DHCP changed");
+          ELEMENTIC_LOG(LOG_INFO, "DHCP changed");
         }
       #endif
     }
@@ -487,7 +488,7 @@ void networkCheckLoop() {
     if (!EthernetConnected) {
       // W5500/W5200: safe to check cable state first.
       if (elementic_eth_has_link_api() && !elementic_eth_link_is_on()) {
-        logging(LOG_CAUTION, "ETH link off");
+        ELEMENTIC_LOG(LOG_CAUTION, "ETH link off");
         g_ethStarted = false;
         return;
       }
@@ -499,7 +500,7 @@ void networkCheckLoop() {
           return;
         }
         g_lastEthRetryMs = now;
-        logging(LOG_INFO, "ETH dhcp retry");
+        ELEMENTIC_LOG(LOG_INFO, "ETH dhcp retry");
         connectToEthernet();
         elementic_refreshNetworkFlags();
         return;
@@ -509,7 +510,7 @@ void networkCheckLoop() {
         return;
       }
       g_lastEthRetryMs = now;
-      logging(LOG_CAUTION, "ETH retry");
+      ELEMENTIC_LOG(LOG_CAUTION, "ETH retry");
       connectToEthernet();
       elementic_refreshNetworkFlags();
     }

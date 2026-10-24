@@ -30,12 +30,29 @@ uint16_t boundedTextLength(const char* value, uint16_t maximum) {
     return static_cast<uint16_t>(strnlen(value, maximum));
 }
 
+void writeAscii3(char first, char second, char third) {
+    Serial.write(static_cast<uint8_t>(first));
+    Serial.write(static_cast<uint8_t>(second));
+    Serial.write(static_cast<uint8_t>(third));
+}
+
+#if defined(ARDUINO_ARCH_AVR)
+uint16_t boundedFlashTextLength(const __FlashStringHelper* value, uint16_t maximum) {
+    if (value == 0) return 0U;
+    const char* flash = reinterpret_cast<const char*>(value);
+    uint16_t length = 0U;
+    while (length < maximum && pgm_read_byte(flash + length) != 0U) ++length;
+    return length;
+}
+#endif
+
 // REQ01 and this compact announcement are shared discovery mechanisms. The
 // announced byte tells Android whether subsequent traffic uses V1 or V2.
 void sendProtocolAnnouncement() {
-    Serial.write(reinterpret_cast<const uint8_t*>("S011"), 4U);
+    writeAscii3('S', '0', '1');
+    Serial.write(static_cast<uint8_t>('1'));
     Serial.write(static_cast<uint8_t>(ELEMENTIC_WIRE_PROTOCOL_VERSION));
-    Serial.write(reinterpret_cast<const uint8_t*>("E01"), 3U);
+    writeAscii3('E', '0', '1');
 }
 
 // =============================================================================
@@ -84,6 +101,23 @@ bool sendV2Tlv(uint8_t kind, uint16_t sequence, uint8_t category,
     if (length != 0U) memcpy(payload + 6U, value, length);
     return sendV2Frame(kind, sequence, payload, static_cast<uint16_t>(length + 6U));
 }
+
+#if defined(ARDUINO_ARCH_AVR)
+bool sendV2TlvFlash(uint8_t kind, uint16_t sequence, uint8_t category,
+                    uint8_t field, uint16_t item,
+                    const __FlashStringHelper* value, uint16_t length) {
+    if (length > 186U || (value == 0 && length != 0U)) return false;
+    uint8_t payload[192];
+    payload[0] = category;
+    payload[1] = field;
+    putU16Le(payload + 2U, item);
+    putU16Le(payload + 4U, length);
+    if (length != 0U) {
+        memcpy_P(payload + 6U, reinterpret_cast<const char*>(value), length);
+    }
+    return sendV2Frame(kind, sequence, payload, static_cast<uint16_t>(length + 6U));
+}
+#endif
 
 void sendV2End(uint16_t sequence, uint32_t capture, uint32_t generation,
                uint16_t records) {
@@ -586,17 +620,40 @@ void sendSerialLog(LogLevel level, const char* text) {
                 reinterpret_cast<const uint8_t*>(text), length);
     #else
       // Protocol V1 (legacy)
-      Serial.print("S01");
-      Serial.print("S02");
+      writeAscii3('S', '0', '1');
+      writeAscii3('S', '0', '2');
       serialwrite(4U);
       serialwrite(static_cast<uint8_t>(level));
       serialwrite(0U);
       serialwrite(static_cast<uint8_t>(length));
       for (uint16_t i = 0; i < length; ++i) serialwrite(static_cast<uint8_t>(text[i]));
-      Serial.print("E02");
-      Serial.print("E01");
+      writeAscii3('E', '0', '2');
+      writeAscii3('E', '0', '1');
     #endif
 }
+
+#if defined(ARDUINO_ARCH_AVR)
+void sendSerialLog(LogLevel level, const __FlashStringHelper* text) {
+    if (text == 0) return;
+    const uint16_t length = boundedFlashTextLength(text, 49U);
+
+    #if ELEMENTIC_WIRE_PROTOCOL_VERSION == 2
+      sendV2TlvFlash(0x13U, 0U, 4U, static_cast<uint8_t>(level), 0U,
+                     text, length);
+    #else
+      writeAscii3('S', '0', '1');
+      writeAscii3('S', '0', '2');
+      serialwrite(4U);
+      serialwrite(static_cast<uint8_t>(level));
+      serialwrite(0U);
+      serialwrite(static_cast<uint8_t>(length));
+      const char* flash = reinterpret_cast<const char*>(text);
+      for (uint16_t i = 0; i < length; ++i) serialwrite(pgm_read_byte(flash + i));
+      writeAscii3('E', '0', '2');
+      writeAscii3('E', '0', '1');
+    #endif
+}
+#endif
 
 // =============================================================================
 // Protocol V1 (legacy) snapshot and EEPROM serialization
@@ -607,7 +664,7 @@ void sendSerialLog(LogLevel level, const char* text) {
 
 void SendSystemInBatch(SystemType systemTypeVal, int value) {
     // Serial.print("S01"); // Initiate
-    Serial.print("S02"); // Marker
+    writeAscii3('S', '0', '2'); // Marker
     serialwrite(3); // Type01: 3 = System
     serialwrite((byte)systemTypeVal); // type02: VARIABLE
     serialwrite(0); // id not required
@@ -615,7 +672,7 @@ void SendSystemInBatch(SystemType systemTypeVal, int value) {
     // Write 2-byte value
     serialwrite((byte)(value & 0xFF));   // low byte first
     serialwrite((byte)(value >> 8));     // high byte second
-    Serial.print("E02");
+    writeAscii3('E', '0', '2');
     // Serial.print("E01");
 }
 
@@ -741,8 +798,8 @@ int DynamicVariableActions(int EP, bool ER, bool SD, bool MEM, DynamicVariable &
 }
 
 void SendAllData(bool ER, bool SD, bool MEM) { // ER = store to EEPROM, SD = send via Serial, MEM = reserved for MEM
-    if (SD) { snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", GetStringValue("MQTTName").c_str(), "/LOG"); }
-    if (ER) { snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", GetStringValue("MQTTName").c_str(), "/LOG"); }
+    if (SD) { ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", GetStringValue("MQTTName").c_str(), "/LOG"); }
+    if (ER) { ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", GetStringValue("MQTTName").c_str(), "/LOG"); }
     int EP = 0; // EEPROM pointer
 
     if (SD) { serialPrintLimited("S01"); } // Initiate frame
@@ -1015,16 +1072,16 @@ void ReadAllDataFromEEPROM() {
     int EP = 0; // EEPROM pointer
     byte type, type01, type02, id, length, version;
 
-    snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", GetStringValue("MQTTName").c_str(), "/LOG");
+    ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", GetStringValue("MQTTName").c_str(), "/LOG");
     // mqttClient.publish(msgmqtt, "Reading data from EEPROM...");
-    logging(LOG_INFO,"Reading data from EEPROM. . .");
+    ELEMENTIC_LOG(LOG_INFO, "Reading data from EEPROM. . .");
 
     // Read type and version
     type = EEPROM.read(EP++);
     version = EEPROM.read(EP++);
 
     char debugBuf[100];
-    sprintf(debugBuf, "Type: %d, Version: %d", type, version);
+    ELEMENTIC_SPRINTF(debugBuf, "Type: %d, Version: %d", type, version);
     // mqttClient.publish(msgmqtt, debugBuf);
 
     if (type != 1 || version != 1) {
@@ -1051,7 +1108,7 @@ void ReadAllDataFromEEPROM() {
             case 0: // Output
                 if (id == 0 || id > OutputChannels) {
                     EP += length;
-                    snprintf(debugBuf, sizeof(debugBuf),
+                    ELEMENTIC_SNPRINTF(debugBuf, sizeof(debugBuf),
                              "EEPROM output id %u out of range; skipped", id);
                     logging(LOG_CAUTION, debugBuf);
                     break;
@@ -1144,7 +1201,7 @@ void ReadAllDataFromEEPROM() {
                     }
                     default:
                         EP += length;
-                        sprintf(debugBuf, "Unknown output block. Skipped %d bytes.", length);
+                        ELEMENTIC_SPRINTF(debugBuf, "Unknown output block. Skipped %d bytes.", length);
                         logging(LOG_CAUTION,debugBuf);
 
                         break;
@@ -1153,7 +1210,7 @@ void ReadAllDataFromEEPROM() {
             case 1: // Input
                 if (id == 0 || id > InputChannels) {
                     EP += length;
-                    snprintf(debugBuf, sizeof(debugBuf),
+                    ELEMENTIC_SNPRINTF(debugBuf, sizeof(debugBuf),
                              "EEPROM input id %u out of range; skipped", id);
                     logging(LOG_CAUTION, debugBuf);
                     break;
@@ -1163,7 +1220,7 @@ void ReadAllDataFromEEPROM() {
                     case 0: { // channel/pin
                         byte val = EEPROM.read(EP++);
                         SwitchPin[id] = val;
-                        sprintf(debugBuf, "SwitchPin[%d] = %d", id, val);
+                        ELEMENTIC_SPRINTF(debugBuf, "SwitchPin[%d] = %d", id, val);
                         logging(LOG_INFO,debugBuf);
                         break;
                     }
@@ -1173,10 +1230,10 @@ void ReadAllDataFromEEPROM() {
                         for (i2 = 0; i2 < length && i2 < sizeof(matrixBuf)-1; i2++) {
                             InOutMatrix[id][i2] = (byte) EEPROM.read(EP++);
                             char temp[5];
-                            sprintf(temp, "%d ", InOutMatrix[id][i2]);
+                            ELEMENTIC_SPRINTF(temp, "%d ", InOutMatrix[id][i2]);
                             strcat(matrixBuf, temp);
                         }
-                        sprintf(debugBuf, "InOutMatrix[%d] = %s", id, matrixBuf);
+                        ELEMENTIC_SPRINTF(debugBuf, "InOutMatrix[%d] = %s", id, matrixBuf);
                         logging(LOG_INFO,debugBuf);;
                         break;
                     }
@@ -1187,7 +1244,7 @@ void ReadAllDataFromEEPROM() {
                             if (copied < ELEMENTIC_INPUT_TOPIC_MAX_BYTES) MQTT_Input[id][copied++] = stored;
                         }
                         MQTT_Input[id][copied] = '\0';
-                        sprintf(debugBuf, "Input Topic[%d] = %s", id, MQTT_Input[id]);
+                        ELEMENTIC_SPRINTF(debugBuf, "Input Topic[%d] = %s", id, MQTT_Input[id]);
                         logging(LOG_INFO,debugBuf);
                         break;
                     }
@@ -1199,27 +1256,27 @@ void ReadAllDataFromEEPROM() {
                             if (copied < ELEMENTIC_INPUT_NAME_MAX_BYTES) Input_Name[id][copied++] = stored;
                         }
                         Input_Name[id][copied] = '\0';
-                        sprintf(debugBuf, "Input Name[%d] = %s", id, Input_Name[id]);
+                        ELEMENTIC_SPRINTF(debugBuf, "Input Name[%d] = %s", id, Input_Name[id]);
                         logging(LOG_INFO,debugBuf);
                         break;
                     }
 
                     default:
                         EP += length;
-                        sprintf(debugBuf, "Unknown input block. Skipped %d bytes.", length);
+                        ELEMENTIC_SPRINTF(debugBuf, "Unknown input block. Skipped %d bytes.", length);
                         logging(LOG_CAUTION,debugBuf);
                         break;
                 }
                 break;
             case 2: { // Generic variables
                 if (id >= totalVariables) { EP += length; break; } // storage index
-                sprintf(debugBuf, "EEPROM READ Case 2(step 1), type: [%d]",variables[id].type);
+                ELEMENTIC_SPRINTF(debugBuf, "EEPROM READ Case 2(step 1), type: [%d]",variables[id].type);
                 mqttClient.publish(msgmqtt, debugBuf);
                 switch (type02) {
                     case 0: {
                         byte val = EEPROM.read(EP++);
                         variables[id].type = (VariableType)val;
-                        sprintf(debugBuf, "Variable[%d] Type = %d", id, val);
+                        ELEMENTIC_SPRINTF(debugBuf, "Variable[%d] Type = %d", id, val);
                         logging(LOG_CAUTION,debugBuf);
                         break;
                     }
@@ -1232,12 +1289,12 @@ void ReadAllDataFromEEPROM() {
                         }
                         varName[i2] = '\0';
                         variables[id].name = varName;
-                        sprintf(debugBuf, "Variable[%d] Name = %s", id, varName);
+                        ELEMENTIC_SPRINTF(debugBuf, "Variable[%d] Name = %s", id, varName);
                         logging(LOG_INFO,debugBuf);
                         break;
                     }
                     case 2: {
-                        sprintf(debugBuf, "EEPROM READ Case 2, type: [%d]",variables[id].type);
+                        ELEMENTIC_SPRINTF(debugBuf, "EEPROM READ Case 2, type: [%d]",variables[id].type);
                         logging(LOG_INFO,debugBuf);
                         switch (variables[id].type) {
                             case DYNAMIC_STRING: {
@@ -1249,14 +1306,14 @@ void ReadAllDataFromEEPROM() {
                                 }
                                 strVal[i2] = '\0';
                                 strcpy(variables[id].value.strVal, strVal);
-                                sprintf(debugBuf, "Variable[%d] Value (String) = %s", id, strVal);
+                                ELEMENTIC_SPRINTF(debugBuf, "Variable[%d] Value (String) = %s", id, strVal);
                                 logging(LOG_INFO,debugBuf);
                                 break;
                             }
                             case DYNAMIC_BYTE: {
                                 byte bVal = EEPROM.read(EP++);
                                 variables[id].value.byteVal = bVal;
-                                sprintf(debugBuf, "Variable[%d] Value (Byte) = %d", id, bVal);
+                                ELEMENTIC_SPRINTF(debugBuf, "Variable[%d] Value (Byte) = %d", id, bVal);
                                 logging(LOG_INFO,debugBuf);
                                 break;
                             }
@@ -1265,7 +1322,7 @@ void ReadAllDataFromEEPROM() {
                                 const uint8_t lowByte = EEPROM.read(EP++);
                                 int intVal = (static_cast<int>(highByte) << 8) | lowByte;
                                 variables[id].value.intVal = intVal;
-                                sprintf(debugBuf, "Variable[%d] Value (Int) = %d", id, intVal);
+                                ELEMENTIC_SPRINTF(debugBuf, "Variable[%d] Value (Int) = %d", id, intVal);
                                 logging(LOG_INFO,debugBuf);
                                 break;
                             }
@@ -1274,7 +1331,7 @@ void ReadAllDataFromEEPROM() {
                                 for (i2 = 0; i2 < 4; i2++) {
                                     ipBytes[i2] = EEPROM.read(EP++);
                                 }
-                                snprintf(debugBuf, sizeof(debugBuf),
+                                ELEMENTIC_SNPRINTF(debugBuf, sizeof(debugBuf),
                                         "Variable[%d] Value (IP) = %d.%d.%d.%d",
                                         id,
                                         ipBytes[0], ipBytes[1], ipBytes[2], ipBytes[3]);
@@ -1293,14 +1350,14 @@ void ReadAllDataFromEEPROM() {
                                 }
                                 passBuf[i2] = '\0';
                                 strcpy(variables[id].value.passVal, passBuf);
-                                sprintf(debugBuf, "Variable[%d] Value (Password) updated", id);
+                                ELEMENTIC_SPRINTF(debugBuf, "Variable[%d] Value (Password) updated", id);
                                 logging(LOG_INFO,debugBuf);
                                 break;
                             }
                             case DYNAMIC_BOOL: {
                                 byte boolVal = EEPROM.read(EP++);
                                 variables[id].value.byteVal = (boolVal != 0) ? 1 : 0;
-                                sprintf(debugBuf, "Variable[%d] Value (Bool) = %d", id, variables[id].value.byteVal);
+                                ELEMENTIC_SPRINTF(debugBuf, "Variable[%d] Value (Bool) = %d", id, variables[id].value.byteVal);
                                 logging(LOG_INFO,debugBuf);
                                 break;
                             }
@@ -1309,7 +1366,7 @@ void ReadAllDataFromEEPROM() {
                     }
                     default:
                         EP += length;
-                        sprintf(debugBuf, "Unknown generic variable block. Skipped %d bytes.", length);
+                        ELEMENTIC_SPRINTF(debugBuf, "Unknown generic variable block. Skipped %d bytes.", length);
                         logging(LOG_CAUTION,debugBuf);
                         break;
                 }
@@ -1322,7 +1379,7 @@ void ReadAllDataFromEEPROM() {
                 // this a four-byte record was incorrect; tagged v1.0.0 and
                 // main both write and consume all six bytes.
                 if (EP + 2 > EEPROM.length()) {
-                    logging(LOG_WARNING, "Truncated EEPROM system record");
+                    ELEMENTIC_LOG(LOG_WARNING, "Truncated EEPROM system record");
                     return;
                 }
                 const int val = static_cast<int>(EEPROM.read(EP)) |
@@ -1354,7 +1411,7 @@ void ReadAllDataFromEEPROM() {
             }
             default:
                 EP += length;
-                sprintf(debugBuf, "Unknown block type. Skipped %d bytes.", length);
+                ELEMENTIC_SPRINTF(debugBuf, "Unknown block type. Skipped %d bytes.", length);
                 logging(LOG_CAUTION,debugBuf);
                 break;
         }
@@ -1362,7 +1419,7 @@ void ReadAllDataFromEEPROM() {
     // sprintf(debugBuf, "Final EP: %d", EP);
     // logging(LOG_INFO,debugBuf);
     EEPROMStorage = EP;
-    logging(LOG_INFO,"End Reading data from EEPROM. . .");
+    ELEMENTIC_LOG(LOG_INFO, "End Reading data from EEPROM. . .");
 }
 
 // =============================================================================
@@ -1376,16 +1433,16 @@ void SendOutputValueSerial(byte id, byte value) {
       return;
     #endif
     // Protocol V1 (legacy)
-    Serial.print("S01"); // Initiate
-    Serial.print("S02"); // Marker
+    writeAscii3('S', '0', '1'); // Initiate
+    writeAscii3('S', '0', '2'); // Marker
     serialwrite(0); // Type01: 0 = Output
     serialwrite(8); // type02: 8 = Value
     serialwrite(id); // id not required
     serialwrite(0); // length not required
     // Write 2-byte value
     serialwrite((byte)value);   // low byte first
-    Serial.print("E02");
-    Serial.print("E01");
+    writeAscii3('E', '0', '2');
+    writeAscii3('E', '0', '1');
 }
 
 void SendSystem(SystemType systemTypeVal, int value) {
@@ -1400,8 +1457,8 @@ void SendSystem(SystemType systemTypeVal, int value) {
       return;
     #endif
     // Protocol V1 (legacy)
-    Serial.print("S01"); // Initiate
-    Serial.print("S02"); // Marker
+    writeAscii3('S', '0', '1'); // Initiate
+    writeAscii3('S', '0', '2'); // Marker
     serialwrite(3); // Type01: 3 = System
     serialwrite((byte)systemTypeVal); // type02: VARIABLE
     serialwrite(0); // id not required
@@ -1409,8 +1466,8 @@ void SendSystem(SystemType systemTypeVal, int value) {
     // Write 2-byte value
     serialwrite((byte)(value & 0xFF));   // low byte first
     serialwrite((byte)(value >> 8));     // high byte second
-    Serial.print("E02");
-    Serial.print("E01");
+    writeAscii3('E', '0', '2');
+    writeAscii3('E', '0', '1');
 }
 
 void SendStatus(byte type1, byte protocolId, byte statusValue) {
@@ -1445,15 +1502,15 @@ void SendStatus(byte type1, byte protocolId, byte statusValue) {
     #endif
 
     // Protocol V1 (legacy)
-    Serial.print("S01");
-    Serial.print("S02");
+    writeAscii3('S', '0', '1');
+    writeAscii3('S', '0', '2');
     serialwrite(protocolType01);
     serialwrite(protocolType02);
     serialwrite(protocolId);
     serialwrite((byte)1);
     serialwrite(statusValue);
-    Serial.print("E02");
-    Serial.print("E01");
+    writeAscii3('E', '0', '2');
+    writeAscii3('E', '0', '1');
 }
 
 // =============================================================================
@@ -1469,7 +1526,7 @@ void serialloop() {
             incomingdata[data_index++] = byteValue;
         } else {
 
-            logging(LOG_CAUTION,"Warning: Serial buffer overflow");
+            ELEMENTIC_LOG(LOG_CAUTION, "Warning: Serial buffer overflow");
             clearIncomingData();
         }
     }
@@ -1531,7 +1588,7 @@ void serialloop() {
 
     // Protocol V1 (legacy): validate and parse S02 records.
     if (!validateV1Command(incomingdata + startPos, completeFrameLength)) {
-        logging(LOG_CAUTION, "Rejected malformed serial command");
+        ELEMENTIC_LOG(LOG_CAUTION, "Rejected malformed serial command");
         clearIncomingData();
         return;
     }
@@ -1605,7 +1662,7 @@ void serialloop() {
                                 Output_Name[id][i2+1] = '\0';
                             }
                             // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/RECEIVEDDATATYPENAme");
-                            snprintf(msgmqtt2, sizeof(msgmqtt2), "Received updated for Type 2: TYPE01=%d, TYPE02=%d, ID=%d, LENGTH=%d, name:%s ", Type01, Type02, id,length2, Output_Name[id]);
+                            ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "Received updated for Type 2: TYPE01=%d, TYPE02=%d, ID=%d, LENGTH=%d, name:%s ", Type01, Type02, id,length2, Output_Name[id]);
                             logging(LOG_INFO,msgmqtt2);
                         break;
                     }
@@ -1615,7 +1672,7 @@ void serialloop() {
                                 MQTT_Output[id][i2] = (char)incomingdata[counter++];
                                 MQTT_Output[id][i2+1] = '\0';
                             }
-                        snprintf(msgmqtt2, sizeof(msgmqtt2), "Received updated for Type 2: TYPE01=%d, TYPE02=%d, ID=%d, LENGTH=%d, name:%s ", Type01, Type02, id,length2, MQTT_Output[id]);
+                        ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "Received updated for Type 2: TYPE01=%d, TYPE02=%d, ID=%d, LENGTH=%d, name:%s ", Type01, Type02, id,length2, MQTT_Output[id]);
                         logging(LOG_INFO,msgmqtt2);
                         break;
                     }
@@ -1632,7 +1689,7 @@ void serialloop() {
                     }
                     default:{
                         counter++;
-                        snprintf(msgmqtt2, sizeof(msgmqtt2), "Unknown received updated for Type2: TYPE01=%d, TYPE02=%d, ID=%d, LENGTH=%d, name:%s ", Type01, Type02, id,length2, MQTT_Output[id]);
+                        ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "Unknown received updated for Type2: TYPE01=%d, TYPE02=%d, ID=%d, LENGTH=%d, name:%s ", Type01, Type02, id,length2, MQTT_Output[id]);
                         logging(LOG_CAUTION,msgmqtt2);
                         break;
                         }
@@ -1697,7 +1754,7 @@ void serialloop() {
                             Input_Name[id][i2+1] = '\0';
                         }
                                     // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/RECEIVEDDATATYPENAme");
-                        snprintf(msgmqtt2, sizeof(msgmqtt2), "Received updated for Type 2: TYPE01=%d, TYPE02=%d, ID=%d, LENGTH=%d, name:%s ", Type01, Type02, id,length2, Input_Name[id]);
+                        ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "Received updated for Type 2: TYPE01=%d, TYPE02=%d, ID=%d, LENGTH=%d, name:%s ", Type01, Type02, id,length2, Input_Name[id]);
                         logging(LOG_INFO,msgmqtt2);
                         break;
                     }
@@ -1725,7 +1782,7 @@ void serialloop() {
                         if (variables[idx].type == DYNAMIC_BYTE) {
                             Value = incomingdata[counter++];
                             variables[idx].value.byteVal = Value;
-                            snprintf(msgmqtt2, sizeof(msgmqtt2),
+                            ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2),
                                     "Generic BYTE updated: id=%d, Value=%d",
                                     id, variables[idx].value.byteVal);
                             logging(LOG_INFO, msgmqtt2);
@@ -1735,7 +1792,7 @@ void serialloop() {
                             byte ValueLow = incomingdata[counter++];
                             byte ValueHigh = incomingdata[counter++];
                             variables[idx].value.intVal = ((int)ValueHigh << 8) | ValueLow;
-                            snprintf(msgmqtt2, sizeof(msgmqtt2),
+                            ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2),
                                     "Generic INT updated: id=%d, ValueHigh=%d, ValueLow=%d, Combined=%d",
                                     id, ValueHigh, ValueLow, variables[idx].value.intVal);
                             logging(LOG_INFO, msgmqtt2);
@@ -1753,7 +1810,7 @@ void serialloop() {
                             variables[idx].value.ipVal[2] = IPAddress[2];
                             variables[idx].value.ipVal[3] = IPAddress[3];
 
-                            snprintf(msgmqtt2, sizeof(msgmqtt2),
+                            ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2),
                                     "Generic IP updated: id=%d, IP=%d.%d.%d.%d",
                                     id, IPAddress[0], IPAddress[1], IPAddress[2], IPAddress[3]);
                             logging(LOG_INFO, msgmqtt2);
@@ -1780,10 +1837,10 @@ void serialloop() {
                             }
 
                             if (variables[idx].type == DYNAMIC_PASSWORD) {
-                                snprintf(msgmqtt2, sizeof(msgmqtt2),
+                                ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2),
                                         "Generic Password updated: id=%d", id);
                             } else {
-                                snprintf(msgmqtt2, sizeof(msgmqtt2),
+                                ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2),
                                         "Generic String updated: id=%d, Text=%s",
                                         id, ReceivedString);
                             }
@@ -1793,7 +1850,7 @@ void serialloop() {
                         if (variables[idx].type == DYNAMIC_BOOL) {
                             Value = incomingdata[counter++];
                             variables[idx].value.byteVal = (Value != 0) ? 1 : 0;
-                            snprintf(msgmqtt2, sizeof(msgmqtt2),
+                            ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2),
                                     "Generic BOOL updated: id=%d, Value=%d",
                                     id, variables[idx].value.byteVal);
                             logging(LOG_INFO, msgmqtt2);
@@ -1810,7 +1867,7 @@ void serialloop() {
                     //break; // should not be changable externally
                     default:{
                         // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/GENERIC");
-                        snprintf(msgmqtt2, sizeof(msgmqtt2), "Generic: No Type");
+                        ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "Generic: No Type");
                         logging(LOG_CAUTION,msgmqtt2);
                         break;
                         }
@@ -1823,26 +1880,26 @@ void serialloop() {
                 int ValueInt = ((int)ValueHigh << 8) | ValueLow;
 
                 // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/LOG");
-                snprintf(msgmqtt2, sizeof(msgmqtt2), "SerialCommand TYPE02=3: %d", ValueInt);
+                ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "SerialCommand TYPE02=3: %d", ValueInt);
                 logging(LOG_INFO,msgmqtt2);
                 if (Type02 == 6) { // Command
                     SerialCommand = ValueInt;
                     // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/LOG");
-                    snprintf(msgmqtt2, sizeof(msgmqtt2), "SerialCommand: %d", ValueInt);
+                    ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "SerialCommand: %d", ValueInt);
                     logging(LOG_INFO,msgmqtt2);;
                 }
 
                 if (Type02 == 14) { // Delete Output
                     DeleteOutput = ValueInt;
                     // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/LOG");
-                    snprintf(msgmqtt2, sizeof(msgmqtt2), "DeleteOutput: %d", ValueInt);
+                    ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "DeleteOutput: %d", ValueInt);
                     logging(LOG_INFO,msgmqtt2);
                 }
 
                 if (Type02 == 15) { // Delete Input
                     DeleteInput = ValueInt;
                     // snprintf(msgmqtt, sizeof(msgmqtt), "%s%s", MQTTName, "/LOG");
-                    snprintf(msgmqtt2, sizeof(msgmqtt2), "DeleteInput: %d", ValueInt);
+                    ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "DeleteInput: %d", ValueInt);
                     logging(LOG_INFO,msgmqtt2);
                 }
                 break;
