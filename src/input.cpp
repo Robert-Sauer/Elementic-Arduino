@@ -9,6 +9,10 @@
 
 void input(){
 for (uint8_t i=1; i <= SwitchCounter; i++){
+    // Pin 0 is the current Elementic 1.x sentinel for an unassigned input.
+    // Do not read it: on AVR boards it may also be the active Serial RX pin.
+    if (SwitchPin[i] == 0) continue;
+
     char suffixBuf[32];
     if(digitalRead(SwitchPin[i])==HIGH||SwitchPressedExternal[i]){
         if(SwitchPressed[i]==false){

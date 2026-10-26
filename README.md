@@ -103,6 +103,18 @@ A generated project header provides compile-time selection:
 
 The generated capacity and text limits come from the selected Device profile. Lower values reserve less SRAM; the generated project is rejected if its configured input or output count exceeds the corresponding capacity.
 
+## Version 1.1.2 unassigned-input safety
+
+Version 1.1.2 treats input pin value `0` consistently with the current
+Elementic 1.x storage and wire contracts: it means that no physical input pin
+is assigned. The input scanner skips such entries, preventing an unassigned
+input from reading GPIO 0 or, on AVR boards, the Serial RX pin.
+
+GPIO 0 remains unavailable through the current pin contract. A future
+coordinated Website, Android, protocol, storage, generator, and Library change
+will introduce a distinct unassigned-pin sentinel so that GPIO 0 can be used
+without ambiguity.
+
 ## Version 1.1.1 SRAM optimization
 
 Version 1.1.1 keeps constant Elementic diagnostics and printf-style format
