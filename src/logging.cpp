@@ -11,6 +11,7 @@
 #include "Elementic.h"
 
 namespace {
+#if ELEMENTIC_USE_MQTT
 
 void buildLogTopic() {
     const String mqttName = GetStringValue("MQTTName");
@@ -54,6 +55,38 @@ void appendRamText(const char* text, size_t position) {
     msgmqtt2[sizeof(msgmqtt2) - 1U] = '\0';
 }
 
+void buildRamLogPayload(LogLevel level, const char* text) {
+    if (text == msgmqtt2) {
+        // Many existing diagnostics format their text in msgmqtt2. Preserve
+        // that text before adding the severity prefix in the same buffer.
+        const size_t prefixLength = 7U;
+        const size_t maxTextLength = sizeof(msgmqtt2) - prefixLength - 1U;
+        size_t textLength = 0U;
+        while (textLength < maxTextLength && msgmqtt2[textLength] != '\0') {
+            ++textLength;
+        }
+        memmove(msgmqtt2 + prefixLength + 1U, msgmqtt2, textLength);
+        writeSeverityPrefix(level);
+        memmove(msgmqtt2 + prefixLength,
+                msgmqtt2 + prefixLength + 1U,
+                textLength);
+        msgmqtt2[prefixLength + textLength] = '\0';
+        return;
+    }
+
+    appendRamText(text, writeSeverityPrefix(level));
+}
+
+bool mqttLogSinkReady() {
+    #if ELEMENTIC_USE_MQTT
+      // Diagnostics may use an already-connected, softly enabled MQTT
+      // session. Logging itself never starts or restores a connection.
+      return logtoMQTT && elementicMqttEnabled() && mqttClient.connected();
+    #else
+      return false;
+    #endif
+}
+
 #if defined(ARDUINO_ARCH_AVR)
 void appendFlashText(const __FlashStringHelper* text, size_t position) {
     if (text == 0 || position >= sizeof(msgmqtt2)) return;
@@ -70,26 +103,33 @@ void appendFlashText(const __FlashStringHelper* text, size_t position) {
 }
 #endif
 
+#endif  // ELEMENTIC_USE_MQTT
 }  // namespace
 
 void logging(LogLevel level, const char* text) {
     if (text == 0) return;
-    if (logtoMQTT) {
+    // Serial first: callers are allowed to format into msgmqtt2, which is also
+    // the MQTT log payload buffer and is rewritten below.
+    if (logtoSerial) sendSerialLog(level, text);
+    #if ELEMENTIC_USE_MQTT
+    if (mqttLogSinkReady()) {
+        buildRamLogPayload(level, text);
         buildLogTopic();
-        appendRamText(text, writeSeverityPrefix(level));
         mqttClient.publish(msgmqtt, msgmqtt2);
     }
-    if (logtoSerial) sendSerialLog(level, text);
+    #endif
 }
 
 #if defined(ARDUINO_ARCH_AVR)
 void logging(LogLevel level, const __FlashStringHelper* text) {
     if (text == 0) return;
-    if (logtoMQTT) {
+    if (logtoSerial) sendSerialLog(level, text);
+    #if ELEMENTIC_USE_MQTT
+    if (mqttLogSinkReady()) {
         buildLogTopic();
         appendFlashText(text, writeSeverityPrefix(level));
         mqttClient.publish(msgmqtt, msgmqtt2);
     }
-    if (logtoSerial) sendSerialLog(level, text);
+    #endif
 }
 #endif

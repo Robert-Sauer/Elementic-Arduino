@@ -41,10 +41,12 @@ void inputsetupvariables() {
   strncpy(Input_Name[3], "Switch 3", sizeof(Input_Name[3]) - 1);
   strncpy(Input_Name[4], "Switch 4", sizeof(Input_Name[4]) - 1);
 
+#if ELEMENTIC_USE_MQTT
   strncpy(MQTT_Input[1], "Test/Switch01", sizeof(MQTT_Input[1]) - 1);
   strncpy(MQTT_Input[2], "Test/Switch02", sizeof(MQTT_Input[2]) - 1);
   strncpy(MQTT_Input[3], "Test/Switch03", sizeof(MQTT_Input[3]) - 1);
   strncpy(MQTT_Input[4], "Test/Switch04", sizeof(MQTT_Input[4]) - 1);
+#endif
 
   InOutMatrix[1][0] = 1;
   InOutMatrixCouter[1] = 1;
@@ -66,20 +68,26 @@ void outputsetupvariables() {
   OutputMaxValue[1] = 200;
   OutputDefaultValue[1] = 100;
   OutputPin[1] = 10;
+#if ELEMENTIC_USE_MQTT
   strncpy(MQTT_Output[1], "Test/LEDDimmable", sizeof(MQTT_Output[1]) - 1);
+#endif
 
   strncpy(Output_Name[2], "Light on/off", sizeof(Output_Name[2]) - 1);
   OutputRelay[2] = 23;
   OutputType[2] = 1;
   OutputPin[2] = 11;
+#if ELEMENTIC_USE_MQTT
   strncpy(MQTT_Output[2], "Test/LightOnOff", sizeof(MQTT_Output[2]) - 1);
+#endif
 
   strncpy(Output_Name[3], "Kantoor", sizeof(Output_Name[3]) - 1);
   OutputType[3] = 6;
   OutputMinValue[3] = 3;
   OutputMaxValue[3] = 100;
   OutputDefaultValue[3] = 20;
+#if ELEMENTIC_USE_MQTT
   strncpy(MQTT_Output[3], "Test/External", sizeof(MQTT_Output[3]) - 1);
+#endif
 }
 
 void elementicLoadFactoryDefaults() {

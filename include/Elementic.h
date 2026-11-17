@@ -29,7 +29,7 @@
 // keep the 1.x behavior with all platform-supported features available.
 #if defined(__has_include)
   #if __has_include(<ProjectVariablesAutomated.h>)
-    #include <ProjectVariablesAutomated.h>
+#include <ProjectVariablesAutomated.h>
   #endif
 #endif
 
@@ -51,6 +51,8 @@
 #define ELEMENTIC_USE_WIFI (ELEMENTIC_HAS_WIFI && ELEMENTIC_FEATURE_WIFI)
 #define ELEMENTIC_USE_ETHERNET (ELEMENTIC_HAS_ETHERNET && ELEMENTIC_FEATURE_ETHERNET)
 #define ELEMENTIC_USE_NETWORK (ELEMENTIC_USE_WIFI || ELEMENTIC_USE_ETHERNET)
+#define ELEMENTIC_USE_MQTT (ELEMENTIC_FEATURE_MQTT && ELEMENTIC_USE_NETWORK)
+#define ELEMENTIC_FEATURE_COMPOSITION_VERSION 1
 
 #if ELEMENTIC_FEATURE_WIFI && !ELEMENTIC_HAS_WIFI && ELEMENTIC_PROJECT_VARIABLES_VERSION >= 2
   #error "The project enables Wi-Fi, but the selected target has no Wi-Fi driver"
@@ -67,8 +69,10 @@ extern const uint16_t ELEMENTIC_DEVICEID;   // generated main.cpp metadata block
 #include <stdint.h>
 #include <stdbool.h>
 
-#include <Client.h>          // basis-klasse voor WiFiClient / EthernetClient
+#if ELEMENTIC_USE_MQTT
+#include <Client.h>
 #include <PubSubClient.h>
+#endif
 #include <string.h>
 #include "ElementicContracts.h"
 
@@ -82,8 +86,10 @@ extern const uint16_t ELEMENTIC_DEVICEID;   // generated main.cpp metadata block
   #error "ELEMENTIC_WIRE_PROTOCOL_VERSION must be 1 or 2"
 #endif
 
-extern Client&      netClient;   // implemented once per sketch
-extern PubSubClient mqttClient;  // same for every board
+#if ELEMENTIC_USE_MQTT
+extern Client& netClient;
+extern PubSubClient mqttClient;
+#endif
 
 /* Constants */ 
 // multiple setups for different microcontrollers!
@@ -130,6 +136,8 @@ extern PubSubClient mqttClient;  // same for every board
 #define ELEMENTIC_OUTPUT_TOPIC_CAPACITY (ELEMENTIC_OUTPUT_TOPIC_MAX_BYTES + 1)
 // Backward-compatible shared capacities for third-party sketches.
 #define MAXNAMELENGTH ((ELEMENTIC_INPUT_NAME_CAPACITY > ELEMENTIC_OUTPUT_NAME_CAPACITY) ? ELEMENTIC_INPUT_NAME_CAPACITY : ELEMENTIC_OUTPUT_NAME_CAPACITY)
+#define ELEMENTIC_EFFECTIVE_INPUT_TOPIC_MAX_BYTES (ELEMENTIC_USE_MQTT ? ELEMENTIC_INPUT_TOPIC_MAX_BYTES : 0)
+#define ELEMENTIC_EFFECTIVE_OUTPUT_TOPIC_MAX_BYTES (ELEMENTIC_USE_MQTT ? ELEMENTIC_OUTPUT_TOPIC_MAX_BYTES : 0)
 #define MAXTOPICLENGTH ((ELEMENTIC_INPUT_TOPIC_CAPACITY > ELEMENTIC_OUTPUT_TOPIC_CAPACITY) ? ELEMENTIC_INPUT_TOPIC_CAPACITY : ELEMENTIC_OUTPUT_TOPIC_CAPACITY)
 
 
@@ -141,7 +149,7 @@ extern PubSubClient mqttClient;  // same for every board
 #define TOTAL_INTS        2
 #define TOTAL_IPS         3
 #define TOTAL_PASSWORDS   2
-#define TOTAL_BOOLS       2
+#define TOTAL_BOOLS       (2 + ELEMENTIC_USE_WIFI + ELEMENTIC_USE_ETHERNET)
 #define TOTAL_DYNAMICVARIABLES       TOTAL_STRINGS+TOTAL_BYTES+TOTAL_INTS+TOTAL_IPS+TOTAL_PASSWORDS+TOTAL_BOOLS
 
 
@@ -149,7 +157,7 @@ extern PubSubClient mqttClient;  // same for every board
 
 /* Enums */
 enum SystemType {
-    IDLE = 0, BOOTING, ETHERNET, MQTT, ERROR,
+    IDLE = 0, BOOTING, ETHERNET, MQTT, SYSTEM_ERROR,
     UPTIME, COMMAND, EEPROMBYTES, RAMBYTES, DEVICETYPE,
     NUMOUTPUTS, MAXOUTPUTS, NUMINPUTS, MAXINPUTS, DELETEOUTPUT, DELETEINPUT, MAXCHARNAME, MAXCHARTOPIC, PROJECTID,
     MAXOUTPUTNAME, MAXOUTPUTTOPIC, MAXINPUTNAME, MAXINPUTTOPIC
@@ -197,7 +205,8 @@ struct DynamicVariable {
     int priority;
 };
 
-/* Global PROGMEM strings */
+/* MQTT topic suffixes */
+#if ELEMENTIC_USE_MQTT
 extern const char onoffset[]            PROGMEM;
 extern const char onoffstatus[]         PROGMEM;
 extern const char dimvalue_set[]        PROGMEM;
@@ -206,6 +215,8 @@ extern const char color_status[]        PROGMEM;
 extern const char color_set[]           PROGMEM;
 extern const char defaultvalue_status[] PROGMEM;
 extern const char defaultvalue_set[]    PROGMEM;
+
+#endif
 
 /* Global PROGMEM Int */
 
@@ -250,7 +261,9 @@ extern uint8_t OutputRedMemory[OutputChannels+1];
 extern uint8_t OutputGreenMemory[OutputChannels+1];
 extern uint8_t OutputBlueMemory[OutputChannels+1];
 extern uint8_t OutputStatus[OutputChannels+1];
+#if ELEMENTIC_USE_MQTT
 extern bool MQTTUpdate[OutputChannels+1];
+#endif
 extern int OutputSignalCountdown[OutputChannels+1];
 extern int blinkingTimer;
 extern bool OutputRelayUpdate;
@@ -264,8 +277,12 @@ extern int SwitchTimer[InputChannels+1];
 extern uint8_t InOutMatrixCouter[InputChannels+1];
 extern uint8_t InOutMatrix[InputChannels+1][INOUT_MATRIX_COLS];
 extern uint8_t InputStatus[InputChannels+1];
+#if ELEMENTIC_USE_MQTT
 extern char MQTT_Output[OutputChannels+1][ELEMENTIC_OUTPUT_TOPIC_CAPACITY];
+#endif
+#if ELEMENTIC_USE_MQTT
 extern char MQTT_Input[InputChannels+1][ELEMENTIC_INPUT_TOPIC_CAPACITY];
+#endif
 // extern char MQTT_Name[OutputChannels][10]; //27-11-2025 overbodig??
 extern char Output_Name[OutputChannels+1][ELEMENTIC_OUTPUT_NAME_CAPACITY];
 extern char Input_Name[InputChannels+1][ELEMENTIC_INPUT_NAME_CAPACITY];
@@ -282,7 +299,9 @@ extern int DeleteInput;
 extern int DeleteOutput;
 extern int EEPROMStorage;
 extern int DMXstartupTimer;
+#if ELEMENTIC_USE_MQTT
 extern int MQTTBurstProtection;
+#endif
 extern char msgmqtt[80];
 extern char msgmqtt2[80];
 extern int loopcounter;
@@ -376,6 +395,12 @@ extern void MQTTSubscribe();
 extern void MQTTLoop();
 extern void MQTTSetupClient();
 extern void MQTTSetupVariables();
+extern bool elementicMqttEnabled();
+extern bool elementicMqttConnected();
+extern bool elementicMqttPublish(const char* topic, const char* payload);
+extern void elementicMarkMqttUpdate(uint8_t id);
+extern bool elementicWifiEnabled();
+extern bool elementicEthernetEnabled();
 extern void callback(char* topic, byte* payload, unsigned int length) ;
 extern void ElementicSetup();
 extern void outputsetupvariables();
@@ -417,7 +442,7 @@ static inline bool startsWith(const char* s, const char* prefix) {
 
 #if defined(ARDUINO_ARCH_AVR)
 
-  #include <avr/pgmspace.h>
+#include <avr/pgmspace.h>
 
   static inline bool streq_P(const char* ram, PGM_P pgm) {
     return strcmp_P(ram, pgm) == 0;
@@ -425,7 +450,7 @@ static inline bool startsWith(const char* s, const char* prefix) {
 
 #elif defined(ESP8266)
 
-  #include <pgmspace.h>
+#include <pgmspace.h>
 
   static inline bool streq_P(const char* ram, PGM_P pgm) {
     return strcmp_P(ram, pgm) == 0;
@@ -467,11 +492,13 @@ extern void sendSerialLog(LogLevel level, const __FlashStringHelper* text);
 // call logging() directly through the existing const char* overload.
 #define ELEMENTIC_LOG(level, literal) logging((level), ELEMENTIC_FLASH_TEXT(literal))
 
-#if defined(ARDUINO_ARCH_AVR)
+#if !ELEMENTIC_USE_MQTT
+#define ELEMENTIC_PUBLISH_LITERAL(topic, literal) elementicMqttPublish(0, 0)
+#elif defined(ARDUINO_ARCH_AVR)
 extern bool elementicPublishFlash(const char* topic, const __FlashStringHelper* payload);
 #define ELEMENTIC_PUBLISH_LITERAL(topic, literal) \
   elementicPublishFlash((topic), F(literal))
 #else
 #define ELEMENTIC_PUBLISH_LITERAL(topic, literal) \
-  mqttClient.publish((topic), (literal))
+  elementicMqttPublish((topic), (literal))
 #endif

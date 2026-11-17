@@ -19,21 +19,48 @@ bool WIFIConnected     = false;
 bool EthernetConnected = false;
 bool networkConnected  = false;
 
-static uint32_t elementic_lastNetStatusMs = 0;
+#if ELEMENTIC_USE_NETWORK
+static bool runtimeFeatureEnabled(const char* name) {
+  for (int index = 0; index < totalVariables; ++index) {
+    if (strcmp(variables[index].name.c_str(), name) == 0) {
+      return variables[index].type == DYNAMIC_BOOL &&
+             variables[index].value.byteVal != 0U;
+    }
+  }
+  return true;  // Historical projects without a soft switch stay enabled.
+}
+#endif
 
-#if ELEMENTIC_HAS_WIFI
+bool elementicWifiEnabled() {
+#if ELEMENTIC_USE_WIFI
+  return runtimeFeatureEnabled("WiFiEnabled");
+#else
+  return false;
+#endif
+}
+
+bool elementicEthernetEnabled() {
+#if ELEMENTIC_USE_ETHERNET
+  return runtimeFeatureEnabled("EthernetEnabled");
+#else
+  return false;
+#endif
+}
+#if ELEMENTIC_USE_NETWORK
+
+#if ELEMENTIC_USE_WIFI
   #if (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_ESP8266)
-    #include <ESP8266WiFi.h>
+#include <ESP8266WiFi.h>
     extern "C" {
-      #include <user_interface.h>
+#include <user_interface.h>
     }
   #elif (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_ESP32)
-    #include <WiFi.h>
-    #include <esp_wifi.h>
+#include <WiFi.h>
+#include <esp_wifi.h>
   #elif (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_PICOW)
-    #include <WiFi.h>
+#include <WiFi.h>
   #elif (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_OPTA)
-    #include <WiFi.h>
+#include <WiFi.h>
   #else
     #error "Bad WiFi driver"
   #endif
@@ -43,9 +70,9 @@ static uint32_t elementic_lastNetStatusMs = 0;
   static uint32_t g_lastWiFiRetryMs = 0;
 #endif
 
-#if ELEMENTIC_HAS_ETHERNET
-  #include <Ethernet.h>
-  #include <SPI.h>
+#if ELEMENTIC_USE_ETHERNET
+#include <Ethernet.h>
+#include <SPI.h>
   static bool g_ethStarted = false;
   static uint32_t g_lastEthBeginMs = 0;
   static uint32_t g_lastEthRetryMs = 0;
@@ -62,7 +89,7 @@ static void elementic_mac_to_string(const uint8_t mac[6], char out[13]) {
            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
 
-#if ELEMENTIC_HAS_WIFI && (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_PICOW)
+#if ELEMENTIC_USE_WIFI && (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_PICOW)
 static bool elementic_use_cyw43_hardware_mac(uint8_t mac[6]) {
   if (WiFi.macAddress(mac) == 0) {
     elementicMacStatus = ELEMENTIC_MAC_ADAPTER_UNSUPPORTED;
@@ -94,7 +121,7 @@ static bool elementic_use_cyw43_hardware_mac(uint8_t mac[6]) {
 }
 #endif
 
-#if ELEMENTIC_HAS_WIFI
+#if ELEMENTIC_USE_WIFI
 static inline bool elementic_wifi_is_connected() {
   return (WiFi.status() == WL_CONNECTED);
 }
@@ -104,7 +131,7 @@ static inline bool elementic_wifi_is_connected() {
 }
 #endif
 
-#if ELEMENTIC_HAS_ETHERNET
+#if ELEMENTIC_USE_ETHERNET
 static void elementic_prepare_ethernet_hardware() {
   if (g_ethHardwarePrepared) return;
 
@@ -194,11 +221,11 @@ static inline bool elementic_eth_has_valid_ip() {
 #endif
 
 static void elementic_refreshNetworkFlags() {
-  WIFIConnected = elementic_wifi_is_connected();
+  WIFIConnected = elementicWifiEnabled() && elementic_wifi_is_connected();
 
-  #if ELEMENTIC_HAS_ETHERNET
-    EthernetConnected = elementic_eth_has_valid_ip();
-    #if ELEMENTIC_HAS_ETHERNET
+  #if ELEMENTIC_USE_ETHERNET
+    EthernetConnected = elementicEthernetEnabled() && elementic_eth_has_valid_ip();
+    #if ELEMENTIC_USE_ETHERNET
       if (EthernetConnected && elementic_eth_has_link_api() && !elementic_eth_link_is_on()) {
         EthernetConnected = false;
       }
@@ -208,11 +235,11 @@ static void elementic_refreshNetworkFlags() {
   #endif
 
   networkConnected = (WIFIConnected || EthernetConnected);
-  elementic_lastNetStatusMs = millis();
+
 }
 
 static void elementic_update_network_variable_status() {
-  #if ELEMENTIC_HAS_NETWORK
+  #if ELEMENTIC_USE_NETWORK
     const bool dhcpEnabled = GetBoolValue("DHCP");
 
     ModifyVariableStatus(VARIABLE_DYNAMIC, 0, "IP Address", STATUS_GRAYED,   dhcpEnabled);
@@ -225,8 +252,9 @@ static void elementic_update_network_variable_status() {
   #endif
 }
 
-#if ELEMENTIC_HAS_WIFI
+#if ELEMENTIC_USE_WIFI
 static void connectToWiFi() {
+  if (!elementicWifiEnabled()) return;
   if (EthernetConnected) return;
   const String ssidStr = GetStringValue("SSID");
   const String passStr = GetPasswordValue("WIFI Password");
@@ -285,7 +313,10 @@ static void connectToWiFi() {
     WiFi.setSleepMode(WIFI_NONE_SLEEP);
   #endif
 
-  const String mqttName = GetStringValue("MQTTName");
+  String mqttName = GetStringValue("Hostname");
+  #if ELEMENTIC_USE_MQTT
+    if (mqttName.length() == 0) mqttName = GetStringValue("MQTTName");
+  #endif
   if (mqttName.length() > 0) {
     #if defined(ESP8266)
       WiFi.hostname(mqttName.c_str());
@@ -302,8 +333,9 @@ static void connectToWiFi() {
 }
 #endif
 
-#if ELEMENTIC_HAS_ETHERNET
+#if ELEMENTIC_USE_ETHERNET
 static void connectToEthernet() {
+  if (!elementicEthernetEnabled()) return;
   elementic_prepare_ethernet_hardware();
 
   uint8_t mac[6];
@@ -312,7 +344,7 @@ static void connectToEthernet() {
     return;
   }
 
-  #if ELEMENTIC_HAS_WIFI
+  #if ELEMENTIC_USE_WIFI
     if (WiFi.status() == WL_CONNECTED) {
       WiFi.disconnect(true);
       WiFi.mode(WIFI_OFF);
@@ -370,20 +402,29 @@ static void connectToEthernet() {
 }
 #endif
 
+#endif  // ELEMENTIC_USE_NETWORK
+
 void setupNetwork() {
+#if ELEMENTIC_USE_NETWORK
   #if ELEMENTIC_PROJECT_VARIABLES_VERSION < 2
-    #if ELEMENTIC_HAS_NETWORK
+    #if ELEMENTIC_USE_NETWORK
       char macAddress[13];
       elementic_mac_to_string(factorymac, macAddress);
       DefineString("Mac Address", macAddress, PriorityCounter++);
       DefineBool("DHCP", factoryDHCP, PriorityCounter++);
+      #if ELEMENTIC_USE_ETHERNET
+        DefineBool("EthernetEnabled", true, PriorityCounter++);
+      #endif
+      #if ELEMENTIC_USE_WIFI
+        DefineBool("WiFiEnabled", true, PriorityCounter++);
+      #endif
       DefineIP("IP Address", factoryip[0], factoryip[1], factoryip[2], factoryip[3], PriorityCounter++);
       DefineIP("Gateway",   factorygateway[0], factorygateway[1], factorygateway[2], factorygateway[3], PriorityCounter++);
       DefineIP("Subnet",    factorysubnet[0], factorysubnet[1], factorysubnet[2], factorysubnet[3], PriorityCounter++);
       DefineString("Hostname", factoryhostname, PriorityCounter++);
     #endif
 
-    #if ELEMENTIC_HAS_WIFI
+    #if ELEMENTIC_USE_WIFI
       DefineString("SSID", factorySSID, PriorityCounter++);
       DefinePassword("WIFI Password", factoryWIFIPassword, PriorityCounter++);
     #endif
@@ -391,9 +432,11 @@ void setupNetwork() {
 
   elementic_refreshNetworkFlags();
   elementic_update_network_variable_status();
+#endif
 }
 
 void connectNetwork() {
+#if ELEMENTIC_USE_NETWORK
   const uint16_t deviceId = elementic_getDeviceId();
 
   if (deviceId == 0) {
@@ -403,7 +446,7 @@ void connectNetwork() {
   }
 
   #if ELEMENTIC_USE_ETHERNET
-    {
+    if (elementicEthernetEnabled()) {
       const bool dhcpEnabled = GetBoolValue("DHCP");
 
       if (elementic_eth_should_try_in_setup(dhcpEnabled)) {
@@ -418,17 +461,56 @@ void connectNetwork() {
   #endif
 
   #if ELEMENTIC_USE_WIFI
-    if (!EthernetConnected) {
+    if (elementicWifiEnabled() && !EthernetConnected) {
       connectToWiFi();
       elementic_refreshNetworkFlags();
     }
   #endif
 
   elementic_update_network_variable_status();
+#endif
 }
 
 void networkCheckLoop() {
+#if ELEMENTIC_USE_NETWORK
   static uint32_t lastNetCheckMs = 0;
+  bool featureStateChanged = false;
+  // Evaluate soft switches every loop, before retry rate limits.
+  #if ELEMENTIC_USE_WIFI
+    static bool wifiWasEnabled = true;
+    const bool wifiEnabled = elementicWifiEnabled();
+    if (wifiEnabled != wifiWasEnabled) {
+      if (!wifiEnabled) {
+        #if defined(ESP8266) || defined(ESP32)
+          WiFi.setAutoReconnect(false);
+        #endif
+        WiFi.disconnect();
+        WiFi.mode(WIFI_OFF);
+        WIFIConnected = false;
+        ELEMENTIC_LOG(LOG_INFO, "WiFi disabled");
+      }
+      g_wifiBeginStarted = false;
+      g_lastWiFiRetryMs = 0U;
+      wifiWasEnabled = wifiEnabled;
+      featureStateChanged = true;
+      lastNetCheckMs = millis() - 5000UL;
+    }
+  #endif
+  #if ELEMENTIC_USE_ETHERNET
+    static bool ethernetWasEnabled = true;
+    const bool ethernetEnabled = elementicEthernetEnabled();
+    if (ethernetEnabled != ethernetWasEnabled) {
+      g_ethStarted = false;
+      g_ethDhcpDeferred = false;
+      g_lastEthRetryMs = millis() - 10000UL;
+      EthernetConnected = false;
+      ethernetWasEnabled = ethernetEnabled;
+      featureStateChanged = true;
+      lastNetCheckMs = millis() - 5000UL;
+      if (!ethernetEnabled) ELEMENTIC_LOG(LOG_INFO, "ETH disabled");
+    }
+  #endif
+  if (featureStateChanged) elementic_refreshNetworkFlags();
 
   #if ELEMENTIC_USE_ETHERNET
     static bool dhcpInitialized = false;
@@ -474,7 +556,7 @@ void networkCheckLoop() {
   #endif
 
   #if ELEMENTIC_USE_WIFI
-    if (!WIFIConnected) {
+    if (elementicWifiEnabled() && !WIFIConnected) {
       if (!g_wifiBeginStarted || (uint32_t)(now - g_lastWiFiRetryMs) >= 10000UL) {
         g_lastWiFiRetryMs = now;
         connectToWiFi();
@@ -485,7 +567,7 @@ void networkCheckLoop() {
   #endif
 
   #if ELEMENTIC_USE_ETHERNET
-    if (!EthernetConnected) {
+    if (elementicEthernetEnabled() && !EthernetConnected) {
       // W5500/W5200: safe to check cable state first.
       if (elementic_eth_has_link_api() && !elementic_eth_link_is_on()) {
         ELEMENTIC_LOG(LOG_CAUTION, "ETH link off");
@@ -515,4 +597,5 @@ void networkCheckLoop() {
       elementic_refreshNetworkFlags();
     }
   #endif
+#endif
 }

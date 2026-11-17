@@ -103,6 +103,37 @@ A generated project header provides compile-time selection:
 
 The generated capacity and text limits come from the selected Device profile. Lower values reserve less SRAM; the generated project is rejected if its configured input or output count exceeds the corresponding capacity.
 
+## Version 1.1.3 feature composition and STM32 USB CDC
+
+Version 1.1.3 aligns the manifest and runtime version and routes all active Library
+diagnostics through `logging(LogLevel, ...)`, including diagnostics emitted by
+the legacy paths. Normal serial protocol frames and normal MQTT input/output
+data remain transport traffic and do not pass through the diagnostic logger.
+
+The MQTT diagnostic sink is deliberately passive. It is used only when MQTT is
+available in the compiled feature contract, the runtime `MQTTEnabled` value is
+effective, `logtoMQTT` is enabled, and the MQTT client is already connected.
+Logging never starts or restores a network or broker connection. Password
+values are not emitted by dynamic-variable diagnostics.
+
+Compile-time exclusion and runtime switches for Wi-Fi, Ethernet and MQTT are
+available. Hard MQTT exclusion removes its client and topic arrays;
+soft disablement retains settings and topics in EEPROM. See the
+[1.1.3 release notes](docs/release-1.1.3.md) for implementation sites,
+compatibility, test instructions and remaining hardware validation.
+
+STM32 Arduino targets are included in the package metadata. A network-free
+STM32F103C8 Blue Pill can use native USB CDC with all three network features
+excluded. Protocol announcements and V2 frames complete positive partial USB
+writes within a bounded timeout. Android flashing through ST-Link is not
+provided by this Library release.
+
+From 1.1.3, list optional dependencies explicitly in the project's PlatformIO
+configuration: `arduino-libraries/Ethernet@^2.0.0` for Ethernet and
+`knolleary/PubSubClient@^2.8.0` for MQTT. Offline projects need neither.
+The Library uses standard dependency scanning; compile guards determine which
+feature implementations and objects enter the firmware.
+
 ## Version 1.1.2 unassigned-input safety
 
 Version 1.1.2 treats input pin value `0` consistently with the current

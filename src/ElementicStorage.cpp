@@ -198,7 +198,9 @@ void emitConfiguration(RecordWriter& writer) {
     emitU8(writer, 0U, 4U, item, OutputMaxValue[item]);
     emitU8(writer, 0U, 5U, item, OutputDefaultValue[item]);
     emitText(writer, 0U, 6U, item, Output_Name[item], sizeof(Output_Name[item]));
+#if ELEMENTIC_USE_MQTT
     emitText(writer, 0U, 7U, item, MQTT_Output[item], sizeof(MQTT_Output[item]));
+#endif
     emitU8(writer, 0U, 8U, item, OutputValueActual[item]);
     emitU16(writer, 0U, 10U, item, OutputChannel[item]);
   }
@@ -212,7 +214,9 @@ void emitConfiguration(RecordWriter& writer) {
       links[i * 2U + 1U] = 0U;
     }
     writer.record(1U, 1U, item, links, static_cast<uint16_t>(linkCount * 2U));
+#if ELEMENTIC_USE_MQTT
     emitText(writer, 1U, 2U, item, MQTT_Input[item], sizeof(MQTT_Input[item]));
+#endif
     emitU8(writer, 1U, 3U, item, 1U);
     emitText(writer, 1U, 5U, item, Input_Name[item], sizeof(Input_Name[item]));
   }
@@ -258,7 +262,7 @@ bool validateRecord(uint8_t category, uint8_t field, uint16_t item,
     if (field == 0U || field == 2U || field == 10U) return length == 2U;
     if (field == 1U || (field >= 3U && field <= 5U) || field == 8U) return length == 1U;
     if (field == 6U) return length <= ELEMENTIC_OUTPUT_NAME_MAX_BYTES;
-    if (field == 7U) return length <= ELEMENTIC_OUTPUT_TOPIC_MAX_BYTES;
+    if (field == 7U) return length <= (ELEMENTIC_USE_MQTT ? ELEMENTIC_OUTPUT_TOPIC_MAX_BYTES : 127U);
     return false;
   }
   if (category == 1U) {
@@ -272,7 +276,7 @@ bool validateRecord(uint8_t category, uint8_t field, uint16_t item,
       }
       return true;
     }
-    if (field == 2U) return length <= ELEMENTIC_INPUT_TOPIC_MAX_BYTES;
+    if (field == 2U) return length <= (ELEMENTIC_USE_MQTT ? ELEMENTIC_INPUT_TOPIC_MAX_BYTES : 127U);
     if (field == 3U) return length == 1U && EEPROM.read(valueOffset) == 1U;
     if (field == 5U) return length <= ELEMENTIC_INPUT_NAME_MAX_BYTES;
     return false;
@@ -373,7 +377,9 @@ bool applyPayload(const SlotInfo& slot) {
         case 4: OutputMaxValue[item] = EEPROM.read(value); break;
         case 5: OutputDefaultValue[item] = EEPROM.read(value); break;
         case 6: copyTextFromEeprom(Output_Name[item], sizeof(Output_Name[item]), value, length); break;
+#if ELEMENTIC_USE_MQTT
         case 7: copyTextFromEeprom(MQTT_Output[item], sizeof(MQTT_Output[item]), value, length); break;
+#endif
         case 8: OutputValueActual[item] = EEPROM.read(value); break;
         case 10: OutputChannel[item] = static_cast<uint8_t>(readU16(value)); break;
       }
@@ -383,7 +389,10 @@ bool applyPayload(const SlotInfo& slot) {
       else if (field == 1U) {
         InOutMatrixCouter[item] = static_cast<uint8_t>(length / 2U);
         for (uint8_t i = 0; i < InOutMatrixCouter[item]; ++i) InOutMatrix[item][i] = static_cast<uint8_t>(readU16(value + i * 2U));
-      } else if (field == 2U) copyTextFromEeprom(MQTT_Input[item], sizeof(MQTT_Input[item]), value, length);
+      }
+#if ELEMENTIC_USE_MQTT
+      else if (field == 2U) copyTextFromEeprom(MQTT_Input[item], sizeof(MQTT_Input[item]), value, length);
+#endif
       else if (field == 5U) copyTextFromEeprom(Input_Name[item], sizeof(Input_Name[item]), value, length);
     } else if (category == 2U) {
       if (item != genericItem) {
@@ -445,7 +454,9 @@ bool legacyImageValid() {
       if (item == 0U || item > InputChannels || !(field == 0U || field == 1U || field == 2U || field == 5U)) return false;
       if (declared == 0U && field == 0U) width = 1U;
     } else if (category == 2U) {
-      if (item >= totalVariables || field > 2U) return false;
+      // Legacy indices may exceed the current pool after feature exclusion.
+      // The reader resolves the saved name against the current registry.
+      if (field > 2U) return false;
       if (declared == 0U) return false;
     } else return false;
     if (position + width > static_cast<uint32_t>(eepromLength) ||

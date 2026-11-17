@@ -22,7 +22,6 @@ unsigned long delayTime = 0;
 // Elementic.cpp constructs PubSubClient with netClient.
 // Provide the proper netClient for each platform.
 // ------------------------------------------------------------
-#include <Client.h>
 #include "deviceIdentification.h"
 
 #if defined(__GNUC__)
@@ -44,59 +43,21 @@ extern const char ELEMENTIC_MCU_FAMILY[17] ELEMENTIC_WEAK = "unknown";
 extern const char ELEMENTIC_APP_VERSION[32] ELEMENTIC_WEAK = "0.0.0-local";
 extern const char ELEMENTIC_BUILD_ULID[27] ELEMENTIC_WEAK = "";
 extern const char ELEMENTIC_RELEASE_ULID[27] ELEMENTIC_WEAK = "";
-extern const char ELEMENTIC_LIBRARY_VERSION[] = "1.1.1";
+extern const char ELEMENTIC_LIBRARY_VERSION[] = "1.1.3";
 extern const uint16_t ELEMENTIC_STORAGE_SCHEMA = 2;
 
-#if defined(ESP8266)
-
-  #include <ESP8266WiFi.h>
-  static WiFiClient _elementic_wifiClient;
-  Client& netClient = _elementic_wifiClient;
-
-#elif defined(ESP32)
-
-  #include <WiFi.h>
-  static WiFiClient _elementic_wifiClient;
-  Client& netClient = _elementic_wifiClient;
-
-#elif ELEMENTIC_HAS_WIFI && (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_PICOW)
-
-  // The Arduino-Pico core supplies WiFiClient for both Pico W (RP2040) and
-  // Pico 2 W (RP2350). Without this branch MQTT would receive NullClient.
-  #include <WiFi.h>
-  static WiFiClient _elementic_wifiClient;
-  Client& netClient = _elementic_wifiClient;
-
-#elif ELEMENTIC_HAS_ETHERNET
-
-  // Ethernet platforms use W5100/W5200/W5500-compatible clients.
-  #include <SPI.h>
-  #include <Ethernet.h>
-
-  static EthernetClient _elementic_ethClient;
-  Client& netClient = _elementic_ethClient;
-
-#else
-
-  // Serial-only targets retain offline configuration without pretending that
-  // a network adapter exists.
-  class ElementicNullClient : public Client {
-   public:
-    int connect(IPAddress, uint16_t) override { return 0; }
-    int connect(const char*, uint16_t) override { return 0; }
-    size_t write(uint8_t) override { return 0; }
-    size_t write(const uint8_t*, size_t) override { return 0; }
-    int available() override { return 0; }
-    int read() override { return -1; }
-    int read(uint8_t*, size_t) override { return 0; }
-    int peek() override { return -1; }
-    void flush() override {}
-    void stop() override {}
-    uint8_t connected() override { return 0; }
-    operator bool() override { return false; }
-  };
-
-  static ElementicNullClient _elementic_nullClient;
-  Client& netClient = _elementic_nullClient;
-
+#if ELEMENTIC_USE_MQTT
+  #if ELEMENTIC_USE_WIFI
+    #if ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_ESP8266
+#include <ESP8266WiFi.h>
+    #else
+#include <WiFi.h>
+    #endif
+    static WiFiClient elementicWifiClient;
+    Client& netClient = elementicWifiClient;
+  #elif ELEMENTIC_USE_ETHERNET
+#include <Ethernet.h>
+    static EthernetClient elementicEthernetClient;
+    Client& netClient = elementicEthernetClient;
+  #endif
 #endif

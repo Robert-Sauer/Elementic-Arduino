@@ -5,47 +5,57 @@
  */
 
 #include <Arduino.h>
-#include <PubSubClient.h>
 #include "Elementic.h"
+
+#if ELEMENTIC_USE_MQTT
 
 #if defined(ARDUINO_ARCH_AVR)
 bool elementicPublishFlash(const char* topic, const __FlashStringHelper* payload) {
   if (topic == 0 || payload == 0) return false;
   strncpy_P(msgmqtt2, reinterpret_cast<const char*>(payload), sizeof(msgmqtt2) - 1U);
   msgmqtt2[sizeof(msgmqtt2) - 1U] = '\0';
-  return mqttClient.publish(topic, msgmqtt2);
+  return elementicMqttPublish(topic, msgmqtt2);
 }
 #endif
 #include "deviceIdentification.h"
 
-#if ELEMENTIC_HAS_WIFI
+#if ELEMENTIC_USE_WIFI
   #if (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_ESP8266)
-    #include <ESP8266WiFi.h>
+#include <ESP8266WiFi.h>
   #elif (ELEMENTIC_WIFI_DRIVER == ELEMENTIC_WIFI_DRIVER_ESP32)
-    #include <WiFi.h>
+#include <WiFi.h>
   #else
-    #include <WiFi.h>
+#include <WiFi.h>
   #endif
 #endif
 
 // Add Ethernet support ONLY if enabled (minor addition)
-#if ELEMENTIC_HAS_ETHERNET
-  #include <SPI.h>
-  #include <Ethernet.h>   // or Ethernet2/Ethernet3 depending on your stack
+#if ELEMENTIC_USE_ETHERNET
+#include <SPI.h>
+#include <Ethernet.h>   // or Ethernet2/Ethernet3 depending on your stack
 #endif
 
-static bool elementic_mqtt_enabled() {
-  #if ELEMENTIC_PROJECT_VARIABLES_VERSION < 2
-    return true;
-  #else
-    if (!ELEMENTIC_FEATURE_MQTT) return false;
+bool elementicMqttEnabled() {
+  for (int index = 0; index < totalVariables; ++index) {
+    if (variables[index].name == "MQTTEnabled") {
+      return variables[index].type == DYNAMIC_BOOL &&
+             variables[index].value.byteVal != 0U;
+    }
+  }
+  return true;
+}
 
-    // Early v2 project revisions enabled MQTT at compile time but did not yet
-    // emit the optional runtime switch. Keep those revisions operational; when
-    // the variable exists, its value remains authoritative.
-    const int enabledIndex = findVariableIndexByName("MQTTEnabled");
-    return enabledIndex < 0 ? true : GetBoolValue("MQTTEnabled");
-  #endif
+bool elementicMqttConnected() {
+  return elementicMqttEnabled() && networkConnected && mqttClient.connected();
+}
+
+bool elementicMqttPublish(const char* topic, const char* payload) {
+  return topic && topic[0] && payload && elementicMqttConnected() &&
+         mqttClient.publish(topic, payload);
+}
+
+void elementicMarkMqttUpdate(uint8_t id) {
+  if (id > 0U && id <= OutputChannels) MQTTUpdate[id] = true;
 }
 
 bool parseIP(const String& ipStr, IPAddress &ip) {
@@ -60,7 +70,7 @@ bool parseIP(const String& ipStr, IPAddress &ip) {
 }
 
 void reconnect() {//-----------------------Reconnect-----------------------
-  if (!elementic_mqtt_enabled()) {
+  if (!elementicMqttEnabled() || !networkConnected) {
     if (mqttClient.connected()) mqttClient.disconnect();
     SendSystem(MQTT, 0);
     return;
@@ -138,6 +148,7 @@ void reconnect() {//-----------------------Reconnect-----------------------
 
 void MQTTSetupVariables(){
   #if ELEMENTIC_PROJECT_VARIABLES_VERSION < 2
+    DefineBool("MQTTEnabled", true, PriorityCounter++);
     DefineString("MQTTName", MQTTName, PriorityCounter++);
     DefineString("MQTTServer", MQTTServer, PriorityCounter++);
     DefineString("MQTTUsername", MQTTUsername, PriorityCounter++);
@@ -146,8 +157,7 @@ void MQTTSetupVariables(){
 }
 
 void MQTTSetupClient(){//-----------------------MQTT Setup-----------------------
-  if (!elementic_mqtt_enabled()) return;
-
+  // Initialize even when softly disabled, so later enabling is operational.
   mqttClient.setCallback(callback);
   mqttClient.setKeepAlive(60);
   mqttClient.setSocketTimeout(5);
@@ -161,9 +171,8 @@ void MQTTSetupClient(){//-----------------------MQTT Setup----------------------
 
 void SendOutputValueMQTT(byte id) {
 
-  if (!elementic_mqtt_enabled()) return;
-  if (!mqttClient.connected()) return;
-  if (!MQTT_Output[id] || MQTT_Output[id][0] == '\0') return;
+  if (id == 0U || id > OutputCounter || !elementicMqttConnected()) return;
+  if (MQTT_Output[id][0] == '\0') return;
 
   char suffixBuf[32];
 
@@ -197,6 +206,8 @@ void SendOutputValueMQTT(byte id) {
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {//-----------------------Callback-----------------------
+
+  if (!elementicMqttEnabled() || !networkConnected) return;
 
   // 1) Safe log (OPTIONAL: you can comment out entirely to reduce load)
   // NOTE: fixed format string bug (only one %s)
@@ -309,13 +320,15 @@ void callback(char* topic, byte* payload, unsigned int length) {//--------------
 
 void MQTTLoop() {
 
-  if (!elementic_mqtt_enabled()) {
+  static bool lastMqttState = false;
+  if (!elementicMqttEnabled() || !networkConnected) {
     if (mqttClient.connected()) mqttClient.disconnect();
+    if (lastMqttState) SendSystem(MQTT, 0);
+    lastMqttState = false;
     return;
   }
 
   static uint32_t lastReconnectAttempt = 0;
-  static bool lastMqttState = false;
 
   const uint32_t now = millis();
 
@@ -372,3 +385,17 @@ void MQTTLoop() {
 #endif
   }
 }
+
+#else
+// Keep the procedural API callable by manual projects without network objects.
+bool elementicMqttEnabled() { return false; }
+bool elementicMqttConnected() { return false; }
+bool elementicMqttPublish(const char*, const char*) { return false; }
+void elementicMarkMqttUpdate(uint8_t) {}
+void reconnect() {}
+void MQTTSetupVariables() {}
+void MQTTSetupClient() {}
+void MQTTLoop() {}
+void SendOutputValueMQTT(byte) {}
+void callback(char*, byte*, unsigned int) {}
+#endif

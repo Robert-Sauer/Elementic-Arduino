@@ -27,7 +27,9 @@ void OutputRelayUpdateFunction(){
         }
     }
 
+#if ELEMENTIC_USE_MQTT
 void MQTTSubscribe(){
+    if (!elementicMqttConnected()) return;
 for (int i=1; i <= OutputCounter; i++){
         //mqttClient.publish(MQTT_Output[i],"INITIALIZED"); //Moet één niveau dieper
         //OutputValueMemory[i] = 0; // Alles uit bij inschakelen 13-12-2025 - Dit veroorzaakte een uitschakeling bij elke reconnect, en ook een MQTT burst
@@ -109,9 +111,15 @@ for (int i=1; i <= OutputCounter; i++){
 
 // }
 
+#else
+void MQTTSubscribe() {}
+#endif
+
 void output(){
     OutputRelayUpdate = false;
+#if ELEMENTIC_USE_MQTT
     char suffixBuf[32]; // 25-08-2025
+#endif
     for (int i=1; i <= OutputCounter; i++){
         if(OutputValueMemory[i]!=OutputValueActual[i]||OutputSignalCountdown[i]>0){//||OutputRedValue[i]!=OutputRedMemory[i]||OutputGreenValue[i]!=OutputGreenMemory[i]||OutputBlueValue[i]!=OutputBlueMemory[i]
             OutputRelayUpdate = true;
@@ -214,13 +222,14 @@ void output(){
 
                     if(OutputValueActual[i]!=OutputValueMemory[i])
                     {
+#if ELEMENTIC_USE_MQTT
                         strcpy_P(suffixBuf, dimvalue_set);
                         ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[i], suffixBuf);
                         ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "%d", OutputValueActual[i]);
-
-                        if (mqttClient.publish(msgmqtt, msgmqtt2)) {
+                        if (elementicMqttPublish(msgmqtt, msgmqtt2)) {
                             OutputValueMemory[i] = OutputValueActual[i];
                         }
+#endif
                     }
                 break;
 
@@ -239,7 +248,6 @@ void output(){
 
  void output10ms(){
     OutputRelayUpdate = false;
-    char suffixBuf[32]; // 25-08-2025
     for (int i=1; i <= OutputCounter; i++){
         if(OutputValueMemory[i]!=OutputValueActual[i]||OutputSignalCountdown[i]>0){//||OutputRedValue[i]!=OutputRedMemory[i]||OutputGreenValue[i]!=OutputGreenMemory[i]||OutputBlueValue[i]!=OutputBlueMemory[i]
             OutputRelayUpdate = true;
@@ -254,7 +262,9 @@ void output(){
                         OutputSignalCountdown[i] = (((uint16_t)OutputMaxValue[i] << 8) | (uint16_t)OutputMinValue[i]);
 
                         SendOutputValueMQTT(i);
+#if ELEMENTIC_USE_MQTT
                         ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "Set timer to: %lu ms.", (unsigned long)OutputSignalCountdown[i] * 10UL);
+#endif
                         logging(LOG_INFO,msgmqtt2);
                         }
                     if (OutputSignalCountdown[i]>0){

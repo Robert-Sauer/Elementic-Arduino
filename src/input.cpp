@@ -13,11 +13,14 @@ for (uint8_t i=1; i <= SwitchCounter; i++){
     // Do not read it: on AVR boards it may also be the active Serial RX pin.
     if (SwitchPin[i] == 0) continue;
 
+#if ELEMENTIC_USE_MQTT
     char suffixBuf[32];
+#endif
     if(digitalRead(SwitchPin[i])==HIGH||SwitchPressedExternal[i]){
         if(SwitchPressed[i]==false){
-            Serial.print(F("Switch pressed: "));
-            Serial.println(i);
+            ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2),
+                               "Switch pressed: %u", static_cast<unsigned>(i));
+            logging(LOG_INFO, msgmqtt2);
             ELEMENTIC_PUBLISH_LITERAL(MQTT_Input[i], "PRESSED");
             SwitchPressed[i] = true;
             for (uint8_t j = 0; j < InOutMatrixCouter[i]; j++){
@@ -61,23 +64,27 @@ for (uint8_t i=1; i <= SwitchCounter; i++){
                         if (!SwitchDimDirection[i]){
                             if (OutputValueActual[InOutMatrix[i][j]]>OutputMinValue[InOutMatrix[i][j]]){
                                 OutputValueActual[InOutMatrix[i][j]]--;
+#if ELEMENTIC_USE_MQTT
                                 strcpy_P(suffixBuf, dimvalue_status);
                                 ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[InOutMatrix[i][j]], suffixBuf); //29-03-2020 verplaatst naar input/mqqt callback 08-12-2025 terug verplaatst
                                 ELEMENTIC_SNPRINTF(msgmqtt2, 20 ,"%d",OutputValueActual[InOutMatrix[i][j]]);
-                                mqttClient.publish(msgmqtt,msgmqtt2);
+                                elementicMqttPublish(msgmqtt,msgmqtt2);
+#endif
                                 }
                             }
                         else{
                             if (OutputValueActual[InOutMatrix[i][j]]<OutputMaxValue[InOutMatrix[i][j]]){
                                 OutputValueActual[InOutMatrix[i][j]]++;
+#if ELEMENTIC_USE_MQTT
                                 strcpy_P(suffixBuf, dimvalue_status);
                                 ELEMENTIC_SNPRINTF(msgmqtt, sizeof(msgmqtt), "%s%s", MQTT_Output[InOutMatrix[i][j]], suffixBuf); //29-03-2020 verplaatst naar input/mqqt callback 08-12-2025 terug verplaatst
                                 ELEMENTIC_SNPRINTF(msgmqtt2, 20 ,"%d",OutputValueActual[InOutMatrix[i][j]]);
-                                mqttClient.publish(msgmqtt,msgmqtt2);
+                                elementicMqttPublish(msgmqtt,msgmqtt2);
+#endif
                                 }
                             }
                         if(OutputType[InOutMatrix[i][j]]==2||OutputType[InOutMatrix[i][j]]==4){ // 29-03-2020 - hier geplaatst om bij output weg te halen
-                            MQTTUpdate[InOutMatrix[i][j]] = true;
+                            elementicMarkMqttUpdate(InOutMatrix[i][j]);
                             }
 
                         SendOutputValueSerial(InOutMatrix[i][j], OutputValueActual[InOutMatrix[i][j]]);
@@ -142,14 +149,17 @@ for (uint8_t i=1; i <= SwitchCounter; i++){
                     break;
                     }
                 if(OutputType[InOutMatrix[i][j]]==2||OutputType[InOutMatrix[i][j]]==4){ // 29-03-2020 - hier geplaatst om bij output weg te halen
-                    MQTTUpdate[InOutMatrix[i][j]] = true;
+                    elementicMarkMqttUpdate(InOutMatrix[i][j]);
                     }
                 }
+#if ELEMENTIC_USE_MQTT
             MQTTBurstProtection=0;
-            Serial.print(F("Switch released: "));
-            Serial.print(i);
-            Serial.print(F(" ,time: "));
-            Serial.println(SwitchTimer[i]);
+#endif
+            ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2),
+                               "Switch released: %u, time: %u",
+                               static_cast<unsigned>(i),
+                               static_cast<unsigned>(SwitchTimer[i]));
+            logging(LOG_INFO, msgmqtt2);
             ELEMENTIC_PUBLISH_LITERAL(MQTT_Input[i], "RELEASED");
 
             SwitchPressed[i] = false;

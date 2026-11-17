@@ -64,7 +64,37 @@ int findVariableIndexByName(const String& varName) {
 //    DEFINE FUNCTIONS
 // -------------------
 
+// Standard feature keys are reserved. Older generated/manual projects may
+// still register them; a hard-excluded feature must not regain saved fields.
+static bool featureVariableAvailable(const String& name) {
+#if defined(ARDUINO_ARCH_AVR) || defined(ESP8266)
+#define ELEMENTIC_KEY_IS(literal) streq_P(name.c_str(), PSTR(literal))
+#else
+#define ELEMENTIC_KEY_IS(literal) (strcmp(name.c_str(), literal) == 0)
+#endif
+#if !ELEMENTIC_USE_MQTT
+    if (ELEMENTIC_KEY_IS("MQTTEnabled") || ELEMENTIC_KEY_IS("MQTTName") ||
+        ELEMENTIC_KEY_IS("MQTTServer") || ELEMENTIC_KEY_IS("MQTTUsername") ||
+        ELEMENTIC_KEY_IS("MQTTPassword")) return false;
+#endif
+#if !ELEMENTIC_USE_WIFI
+    if (ELEMENTIC_KEY_IS("WiFiEnabled") || ELEMENTIC_KEY_IS("SSID") ||
+        ELEMENTIC_KEY_IS("WIFI Password")) return false;
+#endif
+#if !ELEMENTIC_USE_ETHERNET
+    if (ELEMENTIC_KEY_IS("EthernetEnabled")) return false;
+#endif
+#if !ELEMENTIC_USE_NETWORK
+    if (ELEMENTIC_KEY_IS("Mac Address") || ELEMENTIC_KEY_IS("DHCP") ||
+        ELEMENTIC_KEY_IS("IP Address") || ELEMENTIC_KEY_IS("Gateway") ||
+        ELEMENTIC_KEY_IS("Subnet") || ELEMENTIC_KEY_IS("Hostname")) return false;
+#endif
+#undef ELEMENTIC_KEY_IS
+    return true;
+}
+
 void DefineString(const String& varName, const char val[20], int priority) {
+    if (!featureVariableAvailable(varName)) return;
     if (stringIndex < TOTAL_STRINGS) {
         int idx = stringIndex;
         variables[idx].type = DYNAMIC_STRING;
@@ -75,7 +105,7 @@ void DefineString(const String& varName, const char val[20], int priority) {
         variables[idx].priority = priority;
         stringIndex++;
     } else {
-        Serial.println(F("No more space for strings!"));
+        ELEMENTIC_LOG(LOG_CAUTION, "No more space for strings!");
     }
 }
 //void DefineString(const String& varName, char val[20], int priority) {
@@ -96,6 +126,7 @@ void DefineString(const String& varName, const char val[20], int priority) {
 //}
 
 void DefineByte(const String& varName, byte val, int priority) {
+    if (!featureVariableAvailable(varName)) return;
     if (byteIndex < TOTAL_BYTES) {
         int idx = TOTAL_STRINGS + byteIndex;
         variables[idx].type = DYNAMIC_BYTE;
@@ -104,11 +135,12 @@ void DefineByte(const String& varName, byte val, int priority) {
         variables[idx].priority = priority;
         byteIndex++;
     } else {
-        Serial.println(F("No more space for bytes!"));
+        ELEMENTIC_LOG(LOG_CAUTION, "No more space for bytes!");
     }
 }
 
 void DefineInt(const String& varName, int val, int priority) {
+    if (!featureVariableAvailable(varName)) return;
     if (intIndex < TOTAL_INTS) {
         int idx = TOTAL_STRINGS + TOTAL_BYTES + intIndex;
         variables[idx].type = DYNAMIC_INT;
@@ -117,11 +149,12 @@ void DefineInt(const String& varName, int val, int priority) {
         variables[idx].priority = priority;
         intIndex++;
     } else {
-        Serial.println(F("No more space for ints!"));
+        ELEMENTIC_LOG(LOG_CAUTION, "No more space for ints!");
     }
 }
 
 void DefineIP(const String& varName, byte ip1, byte ip2, byte ip3, byte ip4, int priority) {
+    if (!featureVariableAvailable(varName)) return;
     if (ipIndex < TOTAL_IPS) {
         int idx = TOTAL_STRINGS + TOTAL_BYTES + TOTAL_INTS + ipIndex;
         variables[idx].type = DYNAMIC_IP;
@@ -133,11 +166,12 @@ void DefineIP(const String& varName, byte ip1, byte ip2, byte ip3, byte ip4, int
         variables[idx].priority = priority;
         ipIndex++;
     } else {
-        Serial.println(F("No more space for IPs!"));
+        ELEMENTIC_LOG(LOG_CAUTION, "No more space for IPs!");
     }
 }
 
 void DefinePassword(const String& varName, const char* val, int priority) {
+    if (!featureVariableAvailable(varName)) return;
     if (passwordIndex < TOTAL_PASSWORDS) {
         int idx = TOTAL_STRINGS + TOTAL_BYTES + TOTAL_INTS + TOTAL_IPS + passwordIndex;
         variables[idx].type = DYNAMIC_PASSWORD;
@@ -149,11 +183,12 @@ variables[idx].value.passVal[MAX_STRING_LENGTH - 1] = '\0';
         variables[idx].priority = priority;
         passwordIndex++;
     } else {
-        Serial.println(F("No more space for Passwords!"));
+        ELEMENTIC_LOG(LOG_CAUTION, "No more space for Passwords!");
     }
 }
 
 void DefineBool(const String& varName, bool val, int priority) {
+    if (!featureVariableAvailable(varName)) return;
     if (boolIndex < TOTAL_BOOLS) {
         int idx = TOTAL_STRINGS + TOTAL_BYTES + TOTAL_INTS + TOTAL_IPS + TOTAL_PASSWORDS + boolIndex;
         variables[idx].type = DYNAMIC_BOOL;
@@ -162,7 +197,7 @@ void DefineBool(const String& varName, bool val, int priority) {
         variables[idx].priority = priority;
         boolIndex++;
     } else {
-        Serial.println(F("No more space for bools!"));
+        ELEMENTIC_LOG(LOG_CAUTION, "No more space for bools!");
     }
 }
 
@@ -354,35 +389,45 @@ void ProcessVariablesByPriority(void (*action)(DynamicVariable &)) {
 
 // Example action function to show each variable
 void exampleAction(DynamicVariable &var) {
-    Serial.print(F("Processing: "));
-    Serial.print(var.name);
-    Serial.print(F(" | Priority: "));
-    Serial.print(var.priority);
-    Serial.print(F(" | Value: "));
-
     switch (var.type) {
         case DYNAMIC_STRING:
-            Serial.println(var.value.strVal);
+            ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2),
+                               "Processing: %s | Priority: %d | Value: %s",
+                               var.name.c_str(), var.priority, var.value.strVal);
             break;
         case DYNAMIC_BYTE:
-            Serial.println(var.value.byteVal);
+            ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2),
+                               "Processing: %s | Priority: %d | Value: %u",
+                               var.name.c_str(), var.priority,
+                               static_cast<unsigned>(var.value.byteVal));
             break;
         case DYNAMIC_INT:
-            Serial.println(var.value.intVal);
+            ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2),
+                               "Processing: %s | Priority: %d | Value: %d",
+                               var.name.c_str(), var.priority, var.value.intVal);
             break;
         case DYNAMIC_IP:
-            Serial.print(var.value.ipVal[0]); Serial.print(F("."));
-            Serial.print(var.value.ipVal[1]); Serial.print(F("."));
-            Serial.print(var.value.ipVal[2]); Serial.print(F("."));
-            Serial.println(var.value.ipVal[3]);
+            ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2),
+                               "Processing: %s | Priority: %d | Value: %u.%u.%u.%u",
+                               var.name.c_str(), var.priority,
+                               static_cast<unsigned>(var.value.ipVal[0]),
+                               static_cast<unsigned>(var.value.ipVal[1]),
+                               static_cast<unsigned>(var.value.ipVal[2]),
+                               static_cast<unsigned>(var.value.ipVal[3]));
             break;
         case DYNAMIC_PASSWORD:
-            Serial.println(var.value.passVal);
+            ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2),
+                               "Processing: %s | Priority: %d | Value: <protected>",
+                               var.name.c_str(), var.priority);
             break;
         case DYNAMIC_BOOL:
-            Serial.println(var.value.byteVal ? F("true") : F("false"));
+            ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2),
+                               "Processing: %s | Priority: %d | Value: %s",
+                               var.name.c_str(), var.priority,
+                               var.value.byteVal ? "true" : "false");
             break;
     }
+    logging(LOG_INFO, msgmqtt2);
 }
 
 int findVariableIndexByPriority(int targetPriority) {

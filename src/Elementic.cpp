@@ -9,8 +9,9 @@
 #include "Elementic.h"
 
 // tell the CPP that netClient is created elsewhere
-extern Client& netClient;
-PubSubClient mqttClient(netClient);   // ONE definition
+#if ELEMENTIC_USE_MQTT
+PubSubClient mqttClient(netClient);
+#endif
 
 unsigned long previousMillis = 0;
 const unsigned long interval = 2000; // 2 seconds in milliseconds
@@ -42,7 +43,9 @@ void SetOutputsSafe() {
   for (uint16_t i = 0; i <= OutputChannels; ++i) {
     OutputValueActual[i] = 0;
     OutputValueMemory[i] = 0;
+#if ELEMENTIC_USE_MQTT
     MQTTUpdate[i] = false;
+#endif
   }
   setrelays();
 }
@@ -59,12 +62,16 @@ void ClearRuntimeConfiguration() {
   memset(OutputMaxValue, 0, sizeof(OutputMaxValue));
   memset(OutputDefaultValue, 0, sizeof(OutputDefaultValue));
   memset(Output_Name, 0, sizeof(Output_Name));
+#if ELEMENTIC_USE_MQTT
   memset(MQTT_Output, 0, sizeof(MQTT_Output));
+#endif
   memset(SwitchPin, 0, sizeof(SwitchPin));
   memset(InOutMatrixCouter, 0, sizeof(InOutMatrixCouter));
   memset(InOutMatrix, 0, sizeof(InOutMatrix));
   memset(Input_Name, 0, sizeof(Input_Name));
+#if ELEMENTIC_USE_MQTT
   memset(MQTT_Input, 0, sizeof(MQTT_Input));
+#endif
   OutputCounter = 0;
   SwitchCounter = 0;
   ResetDynamicVariables();
@@ -99,6 +106,7 @@ unsigned long LastDMXInterval = 0;
 /* ──────────────────────────────
  *  PROGMEM-constanten
  * ────────────────────────────── */
+#if ELEMENTIC_USE_MQTT
 const char onoffset[]            PROGMEM = "/onoff_set";
 const char onoffstatus[]         PROGMEM = "/onoff_status";
 const char dimvalue_set[]        PROGMEM = "/dimvalue_set";
@@ -107,6 +115,7 @@ const char color_status[]        PROGMEM = "/color_status";
 const char color_set[]           PROGMEM = "/color_set";
 const char defaultvalue_status[] PROGMEM = "/defaultvalue_status";
 const char defaultvalue_set[]    PROGMEM = "/defaultvalue_set";
+#endif
 
 /* ──────────────────────────────
  *  Globale data – **definities**
@@ -135,7 +144,9 @@ uint8_t  OutputBlueMemory[OutputChannels+1]       = {0};
 int      OutputSignalCountdown[OutputChannels+1]  = {0};
 int      blinkingTimer                          = 50; //value per 10 ms
 
+#if ELEMENTIC_USE_MQTT
 bool     MQTTUpdate[OutputChannels+1]         = {false};
+#endif
 uint8_t  OutputStatus[OutputChannels+1] = {0};
 bool     OutputRelayUpdate                  = false;
 
@@ -152,8 +163,10 @@ uint8_t  InOutMatrixCouter[InputChannels+1]     = {0};
 uint8_t  InOutMatrix[InputChannels+1][INOUT_MATRIX_COLS]        = {{0}};
 uint8_t  InputStatus[InputChannels+1]          = {0};
 
+#if ELEMENTIC_USE_MQTT
 char     MQTT_Output[OutputChannels+1][ELEMENTIC_OUTPUT_TOPIC_CAPACITY] = {{0}};
 char     MQTT_Input[InputChannels+1][ELEMENTIC_INPUT_TOPIC_CAPACITY] = {{0}};
+#endif
 // char     MQTT_Name[OutputChannels][10]        = {{0}}; //stil required?
 
 char Output_Name[OutputChannels+1][ELEMENTIC_OUTPUT_NAME_CAPACITY] = {{0}};
@@ -173,11 +186,15 @@ int      DeleteInput               = 0;
 int      DeleteOutput              = 0;
 int      EEPROMStorage             = 0;
 int      DMXstartupTimer           = 0;
+#if ELEMENTIC_USE_MQTT
 int      MQTTBurstProtection       = 0;
+#endif
 char msgmqtt[80];
 char msgmqtt2[80];
 byte PriorityCounter = 1;
+#if ELEMENTIC_USE_MQTT
 long lastReconnectAttempt;
+#endif
 
 /* ──────────────────────────────
  *  Dynamic-variable tabel
@@ -253,9 +270,8 @@ void ElementicLoop(){
   serialloop();
   networkCheckLoop();
 
-  if (networkConnected) {
-    MQTTLoop();
-  }
+  // MQTTLoop also processes disable/disconnect transitions.
+  MQTTLoop();
 
   unsigned long currentMillis = millis();
 
@@ -307,7 +323,9 @@ void ElementicLoop(){
         logging(LOG_INFO,msgmqtt2);
         // Shift text arrays
         strcpy(Output_Name[i],        Output_Name[i + 1]);
+#if ELEMENTIC_USE_MQTT
         strcpy(MQTT_Output[i],        MQTT_Output[i + 1]);
+#endif
 
         // Shift numeric arrays
         OutputPin[i]          = OutputPin[i + 1];
@@ -325,12 +343,16 @@ void ElementicLoop(){
         OutputRedMemory[i]    = OutputRedMemory[i + 1];
         OutputGreenMemory[i]  = OutputGreenMemory[i + 1];
         OutputBlueMemory[i]   = OutputBlueMemory[i + 1];
+#if ELEMENTIC_USE_MQTT
         MQTTUpdate[i]         = MQTTUpdate[i + 1];
+#endif
     }
 
     // Clean last entry (optional)
     Output_Name[OutputCounter][0] = '\0';
+#if ELEMENTIC_USE_MQTT
     MQTT_Output[OutputCounter][0] = '\0';
+#endif
     OutputPin[OutputCounter] = 0;
     OutputChannel[OutputCounter] = 0;
     OutputRelay[OutputCounter] = 0;
@@ -346,7 +368,9 @@ void ElementicLoop(){
     OutputRedMemory[OutputCounter] = 0;
     OutputGreenMemory[OutputCounter] = 0;
     OutputBlueMemory[OutputCounter] = 0;
+#if ELEMENTIC_USE_MQTT
     MQTTUpdate[OutputCounter] = 0;
+#endif
 
     OutputCounter--;
     DeleteOutput = 0;
@@ -360,7 +384,9 @@ void ElementicLoop(){
         ELEMENTIC_SNPRINTF(msgmqtt2, sizeof(msgmqtt2), "Moving input: %d", i);
         logging(LOG_INFO,msgmqtt2);
         strcpy(Input_Name[i],   Input_Name[i + 1]);
+#if ELEMENTIC_USE_MQTT
         strcpy(MQTT_Input[i],  MQTT_Input[i + 1]);
+#endif
         SwitchPin[i]             = SwitchPin[i + 1];
         SwitchPressedExternal[i] = SwitchPressedExternal[i + 1];
         SwitchPressed[i]         = SwitchPressed[i + 1];
@@ -371,7 +397,9 @@ void ElementicLoop(){
     }
 
     Input_Name[SwitchCounter][0]         = '\0';
+#if ELEMENTIC_USE_MQTT
     MQTT_Input[SwitchCounter][0]         = '\0';
+#endif
     SwitchPin[SwitchCounter]             = 0;
     SwitchPressedExternal[SwitchCounter] = 0;
     SwitchPressed[SwitchCounter]         = 0;

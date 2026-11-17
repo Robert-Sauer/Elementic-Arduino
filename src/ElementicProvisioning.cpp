@@ -187,6 +187,12 @@ bool elementicGetEffectiveMac(uint8_t out[6]) {
 }
 
 bool elementicApplySharedMac(bool persistValue) {
+#if !ELEMENTIC_USE_NETWORK
+  // Unit identity remains provisioned separately; an offline build has no
+  // adapter to configure and must not demand a dynamic MAC setting.
+  (void)persistValue;
+  return true;
+#else
   const int index = findVariableIndexByName("Mac Address");
   if (index < 0 || variables[index].type != DYNAMIC_STRING) {
     ELEMENTIC_LOG(LOG_CAUTION, "MAC variable unavailable");
@@ -232,6 +238,7 @@ bool elementicApplySharedMac(bool persistValue) {
     }
   }
   return true;
+#endif
 }
 
 bool elementicProvisionMac(const uint8_t mac[6], const char unitUlid[27]) {
