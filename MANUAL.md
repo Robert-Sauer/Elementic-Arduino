@@ -1,5 +1,9 @@
 # Elementic Library Manual
 
+Library 1.1.4 adds opt-in software bootloader entry for STM32F103 Serasidis HID.
+See [setup, requirements and rollback](docs/release-1.1.4.md). Existing projects
+must rebuild and install the new firmware before Android can request entry.
+
 ## Introduction
 
 Elementic is made so a user can start a working device with very little code. The library handles the serial interface, MQTT, EEPROM storage, inputs, outputs, and generic variables.

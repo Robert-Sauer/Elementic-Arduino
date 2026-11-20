@@ -7,6 +7,7 @@
 #include <Arduino.h>
 #include "ElementicEeprom.h"
 #include "Elementic.h"
+#include "ElementicBootloader.h"
 
 // tell the CPP that netClient is created elsewhere
 #if ELEMENTIC_USE_MQTT
@@ -268,6 +269,7 @@ void ElementicSetup(){
 
 void ElementicLoop(){
   serialloop();
+  if (elementicBootloaderLoop()) return;
   networkCheckLoop();
 
   // MQTTLoop also processes disable/disconnect transitions.

@@ -4,6 +4,10 @@ Elementic is an Arduino library for PlatformIO projects. It provides a shared ru
 
 ## Supported Targets
 
+Library **1.1.4** adds an explicit V2 bootloader-entry
+command for STM32F103C8/CB with Serasidis HID 2.2.2. It is disabled by default;
+see [1.1.4 setup, compatibility and remaining hardware checks](docs/release-1.1.4.md).
+
 The current codebase compiles for these tested software environments:
 
 - Controllino / AVR boards with Ethernet

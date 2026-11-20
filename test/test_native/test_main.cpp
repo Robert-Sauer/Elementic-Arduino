@@ -1,4 +1,5 @@
 #include <unity.h>
+#include "ElementicBootloader.h"
 
 #include "ElementicContracts.h"
 
@@ -147,10 +148,33 @@ void test_unreleased_four_byte_storage_rejected() {
                       visitReleasedStorageV1(bytes, length, 0, 0, 0));
 }
 
+void test_bootloader_vector_boundaries() {
+    TEST_ASSERT_TRUE(elementicSerasidisVectorsValid(0x08000800UL, 0x20005000UL, 0x08000009UL));
+    TEST_ASSERT_TRUE(elementicSerasidisVectorsValid(0x08000800UL, 0x20000008UL, 0x080007FFUL));
+    TEST_ASSERT_FALSE(elementicSerasidisVectorsValid(0x08000000UL, 0x20005000UL, 0x08000009UL));
+    TEST_ASSERT_FALSE(elementicSerasidisVectorsValid(0x08000800UL, 0xFFFFFFFFUL, 0xFFFFFFFFUL));
+    TEST_ASSERT_FALSE(elementicSerasidisVectorsValid(0x08000800UL, 0x20005004UL, 0x08000009UL));
+    TEST_ASSERT_FALSE(elementicSerasidisVectorsValid(0x08000800UL, 0x20005000UL, 0x08000008UL));
+    TEST_ASSERT_FALSE(elementicSerasidisVectorsValid(0x08000800UL, 0x20005000UL, 0x08000801UL));
+}
+
+void test_bootloader_command_fixture() {
+    uint8_t expected[V2_MAX_FRAME], actual[V2_MAX_FRAME];
+    const size_t expectedLength = fromHex("533031310211003412030008000086aaac66453031", expected, sizeof(expected));
+    const uint8_t payload[] = {ELEMENTIC_COMMAND_ENTER_BOOTLOADER, 0, 0};
+    size_t actualLength = 0;
+    TEST_ASSERT_EQUAL(V2_CODEC_OK, encodeV2Frame(0x11, 0x1234, payload, sizeof(payload),
+            actual, sizeof(actual), &actualLength));
+    TEST_ASSERT_EQUAL_UINT(expectedLength, actualLength);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, actual, expectedLength);
+}
+
 }  // namespace
 
 int main(int, char**) {
     UNITY_BEGIN();
+    RUN_TEST(test_bootloader_vector_boundaries);
+    RUN_TEST(test_bootloader_command_fixture);
     RUN_TEST(test_mac_contract);
     RUN_TEST(test_mac_unterminated);
     RUN_TEST(test_mac_in_esp32_sized_buffer);

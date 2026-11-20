@@ -17,6 +17,7 @@
 #include <Arduino.h>
 #include "Elementic.h"
 #include "ElementicEeprom.h"
+#include "ElementicBootloader.h"
 #define MAX_SERIAL_BUFFER 500
 
 namespace {
@@ -204,6 +205,8 @@ void sendV2Info(uint16_t sequence) {
     sendBytes(0x30U, outputTypes, sizeof(outputTypes));
     const uint8_t inputTypes[] = {1};
     sendBytes(0x32U, inputTypes, sizeof(inputTypes));
+    value[0] = elementicBootloaderMethod();
+    sendBytes(0x33U, value, 1U);
     sendV2End(sequence, 0U, 0U, count);
 }
 
@@ -488,7 +491,7 @@ uint8_t processV2Command(const elementic::V2FrameView& decoded) {
     const uint8_t command = decoded.payload[0];
     const uint16_t argument = getU16Le(decoded.payload + 1U);
     uint8_t status = 0U;
-    if ((command <= 4U || command == 7U) && argument != 0U) status = 1U;
+    if ((command <= 4U || command == 7U || command == ELEMENTIC_COMMAND_ENTER_BOOTLOADER) && argument != 0U) status = 1U;
     else if (command == 0U) SerialCommand = REBOOT;
     else if (command == 1U) status = elementicSaveConfiguration() ? 0U : 5U;
     else if (command == 2U) {
@@ -500,6 +503,7 @@ uint8_t processV2Command(const elementic::V2FrameView& decoded) {
     else if (command == 5U && argument >= 1U && argument <= OutputCounter) DeleteOutput = argument;
     else if (command == 6U && argument >= 1U && argument <= static_cast<uint16_t>(SwitchCounter)) DeleteInput = argument;
     else if (command == 7U) elementicEnterMacReprovisioning();
+    else if (command == ELEMENTIC_COMMAND_ENTER_BOOTLOADER) status = elementicRequestBootloader();
     else status = 1U;
     sendV2Result(decoded.sequence, decoded.kind, status);
     return status;
@@ -520,6 +524,10 @@ void processV2Frame(const uint8_t* frame, size_t frameLength) {
             if (requestHash == lastMutationHash && decoded.kind == lastMutationKind) {
                 sendV2Result(decoded.sequence, decoded.kind, lastMutationStatus);
             } else sendV2Result(decoded.sequence, decoded.kind, 7U);
+            return;
+        }
+        if (elementicBootloaderPending()) {
+            sendV2Result(decoded.sequence, decoded.kind, 3U);
             return;
         }
         uint8_t status = 0U;
